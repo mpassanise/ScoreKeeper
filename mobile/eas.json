@@ -1,1 +1,42 @@
-{"cli":{"version":">= 16.0.0"},"build":{"development":{"developmentClient":true,"distribution":"internal"},"preview":{"distribution":"internal"},"production":{"autoIncrement":true}},"submit":{"production":{}}}
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api",
+        "EXPO_PUBLIC_AUTHORITY": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
+        "EXPO_PUBLIC_CLIENT_ID": "7202edc2-fec5-4a71-b5f7-77fd49d42bb4",
+        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api",
+        "EXPO_PUBLIC_AUTHORITY": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
+        "EXPO_PUBLIC_CLIENT_ID": "7202edc2-fec5-4a71-b5f7-77fd49d42bb4",
+        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access"
+      },
+      "developmentClient": false,
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api",
+        "EXPO_PUBLIC_AUTHORITY": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
+        "EXPO_PUBLIC_CLIENT_ID": "7202edc2-fec5-4a71-b5f7-77fd49d42bb4",
+        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
