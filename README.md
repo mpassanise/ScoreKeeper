@@ -1,3 +1,35 @@
+# Scorekeeper
+
+React web scoresheet, shared C# scoring API, and React Native/Expo mobile app.
+
+- `app/`: web client. Original browser-local mode remains the default until Azure configuration is supplied. Configured cloud mode uses the same API as mobile.
+- `backend/Scorekeeper.Core/`: authoritative scoring rules.
+- `backend/Scorekeeper.Api/`: .NET 10 isolated Azure Functions with External ID token validation and Azure SQL persistence.
+- `backend/Scorekeeper.Tests/`: executable scoring checks.
+- `shared/api.ts`: common typed API client for web/mobile; no duplicate cloud scoring logic.
+- `mobile/`: Expo iOS/Android application and EAS build profiles.
+
+Start with [Azure setup](docs/AZURE_SETUP.md) and [API contract](docs/API.md). No Azure resources or mobile builds are provisioned by checking out this code. GitHub and the Sites managed repository do not automatically synchronize.
+
+```sh
+# Web
+pnpm install --frozen-lockfile
+pnpm dev
+# Backend (.NET 10 and Azure Functions Core Tools v4)
+dotnet build backend/Scorekeeper.Api/Scorekeeper.Api.csproj
+dotnet run --project backend/Scorekeeper.Tests/Scorekeeper.Tests.csproj
+# Mobile
+cd mobile
+npm ci
+npx expo start --dev-client
+```
+
+Copy the example configuration files before running connected mode. Never commit the local settings files or credentials. Offline cloud scoring is not implemented yet; the existing web local mode still works independently.
+
+---
+
+## Web starter reference
+
 # vinext-starter
 
 A clean full-stack starter running on [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and Drizzle support.

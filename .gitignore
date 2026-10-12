@@ -44,3 +44,17 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+
+# Shared API / mobile development
+**/bin/
+**/obj/
+**/local.settings.json
+mobile/.expo/
+mobile/node_modules/
+.env.local
+mobile/.env
+
+!.env.example
+!mobile/.env.example
+
+*.tsbuildinfo

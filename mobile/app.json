@@ -1,0 +1,1 @@
+{"expo":{"name":"Scorekeeper","slug":"scorekeeper","version":"1.0.0","scheme":"scorekeeper","orientation":"portrait","userInterfaceStyle":"light","ios":{"supportsTablet":true,"bundleIdentifier":"com.mpassanise.scorekeeper"},"android":{"package":"com.mpassanise.scorekeeper"},"plugins":["expo-secure-store"],"experiments":{"autolinkingModuleResolution":true}}}

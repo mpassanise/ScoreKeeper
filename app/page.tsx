@@ -1,4 +1,6 @@
 "use client";
+import CloudHome from "./cloud/CloudHome";
+import { cloudEnabled } from "./cloud/auth";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronRight, Plus, RotateCcw, Trophy } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -8,7 +10,8 @@ type Entry={id:string;playerId:string;points:number};
 type Game={id:string;name:string;players:Player[];winner:"high"|"low";entries:Entry[];next:string;finished:boolean;updated:number};
 const key="scorekeeper-v1";
 const uid=()=>crypto.randomUUID();
-export default function Home(){
+export default function Home(){return cloudEnabled ? <CloudHome/> : <LocalHome/>;}
+function LocalHome(){
  const [games,setGames]=useState<Game[]>([]),[ready,setReady]=useState(false),[activeId,setActiveId]=useState<string|null>(null);
  const [name,setName]=useState("Scrabble"),[names,setNames]=useState(["",""]),[winner,setWinner]=useState<"high"|"low">("high");
  const [points,setPoints]=useState(""),[edit,setEdit]=useState<Entry|null>(null),[editValue,setEditValue]=useState(""),[error,setError]=useState("");
