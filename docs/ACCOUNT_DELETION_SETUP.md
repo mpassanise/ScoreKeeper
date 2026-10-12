@@ -58,8 +58,10 @@ On your Windows computer, from your repository folder:
 ```powershell
 git pull
 cd backend/Scorekeeper.Api
-func azure functionapp publish scorekeeper-api
+func azure functionapp publish scorekeeper-api --dotnet-isolated
 ```
+
+The `--dotnet-isolated` flag explicitly selects the worker runtime when Core Tools cannot detect it from the project files. If you see "Worker runtime cannot be None", use the command above with that flag.
 
 Use the same working .NET isolated deployment setup you used previously. The project targets .NET 10. If publish reports a runtime mismatch, use the existing deployment instructions in `docs/AZURE_SETUP.md`; do not switch to the in-process runtime.
 

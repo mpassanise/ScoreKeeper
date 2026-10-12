@@ -47,7 +47,7 @@ Deploy after local verification:
 ```sh
 dotnet publish backend/Scorekeeper.Api/Scorekeeper.Api.csproj -c Release
 cd backend/Scorekeeper.Api
-func azure functionapp publish <your-function-app-name>
+func azure functionapp publish <your-function-app-name> --dotnet-isolated
 ```
 
 Run an authenticated smoke test: create a game, score two turns, edit, undo, fetch from a second client. Repeat the previous version of a mutation and confirm 409. Use a second customer account and confirm it cannot read the first account's game. Anonymous requests should return 401. A paused/unavailable database must not result in a claimed successful score save.
