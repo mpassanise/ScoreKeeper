@@ -19,3 +19,13 @@ Every action includes the last fetched game version. SQL updates compare the ver
 Storage uses one JSON aggregate per game in SQL, with owner/version/index columns. This keeps turn changes atomic and avoids several per-turn SQL queries. It is suitable for the small app; analytical reporting or much larger histories would justify a normalized schema later. List responses are deliberately capped at 200; pagination is a future extension.
 
 401 = missing/invalid token or delegated scope; 400 = invalid command/import; 404 = not found for current owner; 409 = version/ID conflict; 503 = temporary service/database failure.
+
+## Account deletion
+
+Authenticated `GET /api/account` returns `{deletionEnabled, deletionStatus}`. `deletionStatus` is `null`, `pending`, or `completed`. Configuration availability is not a Graph health check.
+
+Authenticated `POST /api/account/delete` accepts only `{ "confirmation": "DELETE" }`. The target identity and SQL owner are derived from the validated JWT, never from a request-body user ID. HTTP 200 with `status: "completed"` means identity deletion and live SQL cleanup finished. HTTP 202 with `status: "pending"` records an incomplete request; the user can explicitly retry the same endpoint. Requests are idempotent; clients do not automatically retry mutations.
+
+Pending/completed accounts receive HTTP 410 from game endpoints. SQL owner locks serialize game writes against deletion recording and cleanup. Completed tombstones are retained for approximately 30 days, and accepted access-token lifetimes are limited to 24 hours. Account endpoints still authenticate and permit deletion retries with valid tokens.
+
+Server-only Graph configuration and the required SQL migration are documented in [ACCOUNT_DELETION_SETUP.md](ACCOUNT_DELETION_SETUP.md). Graph client credentials must never enter client bundles.

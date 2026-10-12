@@ -17,7 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">{children}<footer className="site-footer"><a href="/">Scorekeeper</a><a href="/privacy">Privacy</a><a href="/support">Support</a></footer></body>
     </html>
   );
 }

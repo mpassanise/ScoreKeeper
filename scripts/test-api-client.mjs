@@ -17,4 +17,14 @@ globalThis.fetch=async()=>{calls.push({});return{ok:false,status:409,json:async(
 await assert.rejects(()=>api.act({id:'game',version:7},{action:'undo'}),e=>e instanceof ApiError&&e.status===409);
 assert.equal(calls.length,2,'mutations must not be automatically retried');
 assert.throws(()=>new ScorekeeperApi('http://remote.example/api',async()=>''));
-console.log('API client request, version, conflict and HTTPS checks passed.');
+globalThis.fetch=async(url,options)=>{calls.push({url,options});return{ok:true,json:async()=>({status:'pending',message:'Retry'})}};
+const deletion=await api.deleteAccount('DELETE');
+assert.equal(deletion.status,'pending');
+assert.equal(calls[2].url,'https://api.example.test/api/account/delete');
+assert.equal(calls[2].options.method,'POST');
+assert.deepEqual(JSON.parse(calls[2].options.body),{confirmation:'DELETE'},'no client-supplied owner');
+await api.account();assert.equal(calls[3].options.method,'GET');assert.equal(calls[3].url,'https://api.example.test/api/account');
+globalThis.fetch=async()=>{calls.push({});return{ok:false,status:503,json:async()=>{throw new SyntaxError('HTML')}}};
+await assert.rejects(()=>api.deleteAccount('DELETE'),e=>e instanceof ApiError&&e.status===503);
+assert.equal(calls.length,5,'account deletion failures must not be retried automatically');
+console.log('API client request, conflict, deletion and HTTPS checks passed.');

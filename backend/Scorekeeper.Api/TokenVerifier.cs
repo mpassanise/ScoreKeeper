@@ -29,6 +29,8 @@ public sealed class TokenVerifier
    if(!result.IsValid){if(result.Exception is SecurityTokenSignatureKeyNotFoundException)manager.RequestRefresh();throw new UnauthorizedAccessException();}
    var claims=result.ClaimsIdentity;
    var oid=claims.FindFirst("oid")?.Value;
+   // Deletion markers expire after 30 days; reject access tokens with lifetimes over 24 hours.
+   if(!long.TryParse(claims.FindFirst("iat")?.Value,out var issued)||!long.TryParse(claims.FindFirst("exp")?.Value,out var expires)||expires<=issued||expires-issued>86400||issued>DateTimeOffset.UtcNow.ToUnixTimeSeconds()+60)throw new UnauthorizedAccessException();
    if(claims.FindFirst("tid")?.Value!=tenant || !Guid.TryParse(oid,out _) || !(claims.FindFirst("scp")?.Value.Split(' ')??[]).Contains(scope))throw new UnauthorizedAccessException();
    return tenant+":"+oid;
   }

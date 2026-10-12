@@ -15,3 +15,5 @@ END;
 -- In Azure SQL, substitute the actual Function App managed-identity name below:
 -- CREATE USER [scorekeeper-api] FROM EXTERNAL PROVIDER;
 -- GRANT SELECT, INSERT, UPDATE ON dbo.Games TO [scorekeeper-api];
+
+-- For account deletion, also run migrations/002_account_deletion.sql before the updated API.

@@ -156,3 +156,7 @@ The portable build runs Vinext directly without a host `timeout` command. The ma
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+
+## Account deletion and public pages
+
+The web and native apps provide Account settings with confirmed deletion. Configure the required SQL migration and server-only Microsoft Graph permissions using [docs/ACCOUNT_DELETION_SETUP.md](docs/ACCOUNT_DELETION_SETUP.md) before enabling it. Public privacy and support pages are available at `/privacy` and `/support`.
