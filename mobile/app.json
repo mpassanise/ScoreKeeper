@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.mpassanise.scorekeeper",
       "icon": "./assets/icon.png"
     },
