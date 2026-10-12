@@ -8,7 +8,8 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mpassanise.scorekeeper"
+      "bundleIdentifier": "com.mpassanise.scorekeeper",
+      "icon": "./assets/icon.png"
     },
     "android": {
       "package": "com.mpassanise.scorekeeper"
@@ -23,6 +24,7 @@
       "eas": {
         "projectId": "5ecd881c-9834-459c-b443-99cda9749cf6"
       }
-    }
+    },
+    "icon": "./assets/icon.png"
   }
 }
