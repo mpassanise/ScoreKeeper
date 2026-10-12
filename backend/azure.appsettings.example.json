@@ -1,0 +1,27 @@
+[
+  {
+    "name": "AuthAuthority",
+    "value": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
+    "slotSetting": false
+  },
+  {
+    "name": "AuthTenantId",
+    "value": "e8d1bba5-f80e-44fa-a71c-824ff6312d31",
+    "slotSetting": false
+  },
+  {
+    "name": "AuthAudience",
+    "value": "c6f1573d-1e0c-4830-abed-a71b47d49cc8",
+    "slotSetting": false
+  },
+  {
+    "name": "AuthScope",
+    "value": "Scorekeeper.Access",
+    "slotSetting": false
+  },
+  {
+    "name": "ScorekeeperSql",
+    "value": "Server=tcp:scorekeeperapp.database.windows.net,1433;Database=free-sql-db-4371450;Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;",
+    "slotSetting": false
+  }
+]

@@ -1,6 +1,6 @@
 # Scorekeeper public Azure identifiers
 
-These identifiers were supplied by the owner. App permissions, redirects and the user flow still need verification in Azure. API URL and SQL server/database names remain pending.
+These identifiers were supplied by the owner. App permissions, redirects and the user flow still need verification in Azure. The resource names below were also supplied by the owner; deployment and connectivity remain unverified.
 
 | Setting | Value |
 |---|---|
@@ -14,6 +14,19 @@ These identifiers were supplied by the owner. App permissions, redirects and the
 
 The `.onmicrosoft.com` value is the tenant's primary domain. Use `.ciamlogin.com` for customer sign-in. Do not move the Azure subscription into the customer tenant: host Functions and SQL in the existing subscription directory.
 
-The examples are prefilled with these public values; they do not activate cloud mode themselves. Do not replace `YOUR-APP` until the Function App's actual default hostname is known. Azure may use a generated/hash-based hostname; copy it from the Function App Overview rather than constructing it from the app name.
+The examples are prefilled with these public values; they do not activate cloud mode themselves. The API examples now use the actual default hostname supplied from Azure.
 
 See [Azure setup](AZURE_SETUP.md) for the resource and database identity setup. Registration values do not prove the delegated scope, admin consent or user-flow association has been configured.
+
+## Hosted resources
+
+| Resource | Value |
+|---|---|
+| Function App | `scorekeeper-api` |
+| API base URL | `https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api` |
+| SQL server | `scorekeeperapp.database.windows.net` |
+| Database | `free-sql-db-4371450` |
+
+`scorekeeperapp/free-sql-db-4371450` is the server/database resource label. Use only `free-sql-db-4371450` for the connection string's Database value.
+
+The owner reports the SQL free offer is applied. Keep the free-limit behavior set to auto-pause until next month. `backend/azure.appsettings.example.json` contains the app-owned settings to add; preserve existing Function runtime/storage settings. Enable the Function's system-assigned identity and grant it SQL access before using the managed-identity connection.
