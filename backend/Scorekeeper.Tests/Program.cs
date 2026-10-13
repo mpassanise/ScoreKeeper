@@ -18,6 +18,33 @@ g=Scoring.Apply(g,new(g.Version,"edit",24,EntryId:g.Entries[0].Id));Check(Scorin
 var low=Scoring.Create(Guid.NewGuid(),"Golf",["A","B"],"low");low=Scoring.Apply(low,new(low.Version,"score",7));low=Scoring.Apply(low,new(low.Version,"score",4));low=Scoring.Apply(low,new(low.Version,"finish"));Check(Scoring.View(low).WinnerIds.SequenceEqual([low.Players[1].Id]),"low winner");
 Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Game",["Mike"," mike "],"high"),"duplicate names rejected");
 Throws<ArgumentException>(()=>Scoring.Validate(g with{Next=Guid.NewGuid()}),"invalid imports rejected");
+// New game endings, round fairness and correction after automatic completion.
+var rounds=Scoring.Create(Guid.NewGuid(),"Rounds",["A","B"],"high","rounds",1);
+rounds=Scoring.Apply(rounds,new(rounds.Version,"score",5));Check(!rounds.Finished,"wait for every player");
+rounds=Scoring.Apply(rounds,new(rounds.Version,"select",PlayerId:rounds.Players[0].Id));
+rounds=Scoring.Apply(rounds,new(rounds.Version,"score",5));Check(!rounds.Finished,"extra turn is not a full round");
+rounds=Scoring.Apply(rounds,new(rounds.Version,"score",10));Check(rounds.Finished&&Scoring.View(rounds).WinnerIds.Length==2,"complete round supports ties");
+rounds=Scoring.Apply(rounds,new(rounds.Version,"undo"));Check(!rounds.Finished&&rounds.Next==rounds.Players[1].Id,"undo reopens completed round");
+var target=Scoring.Create(Guid.NewGuid(),"Target",["A","B"],"high","target",targetScore:20);
+target=Scoring.Apply(target,new(target.Version,"score",25));Check(target.Finished&&target.Entries.Length==1,"target ends immediately on overshoot");
+Throws<ArgumentException>(()=>Scoring.Apply(target,new(target.Version,"resume")),"limit cannot be resumed while met");
+target=Scoring.Apply(target,new(target.Version,"edit",10,EntryId:target.Entries[0].Id));Check(!target.Finished,"edit below target reopens");
+target=Scoring.Apply(target,new(target.Version,"edit",20,EntryId:target.Entries[0].Id));Check(target.Finished,"edit to target ends");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high","rounds",2,playStyle:"free"),"free rounds rejected");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high","rounds",0),"zero rounds rejected");
+var legacy=System.Text.Json.JsonSerializer.Deserialize<Game>("{\"Id\":\""+Guid.NewGuid()+"\",\"Name\":\"Old\",\"Players\":[],\"Winner\":\"high\",\"Entries\":[],\"Next\":\""+Guid.NewGuid()+"\",\"Finished\":false,\"Version\":1,\"Updated\":\"2026-10-01T00:00:00Z\"}");
+Check(legacy?.EndCondition=="manual" && legacy.PlayStyle=="turns" && legacy.ScoreMode=="add","legacy JSON defaults to turn-based additive manual games");
+var free=Scoring.Create(Guid.NewGuid(),"Free",["A","B"],"high",playStyle:"free");var b=free.Players[1].Id;
+Throws<ArgumentException>(()=>Scoring.Apply(free,new(free.Version,"score",4)),"free needs an explicit player");
+Throws<ArgumentException>(()=>Scoring.Apply(free,new(free.Version,"score",4,PlayerId:Guid.NewGuid())),"free rejects a foreign player");
+free=Scoring.Apply(free,new(free.Version,"score",4,PlayerId:b));free=Scoring.Apply(free,new(free.Version,"score",6,PlayerId:b));Check(Scoring.View(free).Totals[b]==10&&free.Next==b,"free scores same player twice without rotating");
+var snapshot=Scoring.Create(Guid.NewGuid(),"Totals",["A","B"],"high","target",targetScore:50,playStyle:"free",scoreMode:"total");var a=snapshot.Players[0].Id;
+snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"score",30,PlayerId:a));snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"score",40,PlayerId:a));Check(Scoring.View(snapshot).Totals[a]==40&&!snapshot.Finished,"total snapshots replace not add");
+snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"edit",80,EntryId:snapshot.Entries[0].Id));Check(Scoring.View(snapshot).Totals[a]==40&&!snapshot.Finished,"older snapshot edit does not replace newest");
+snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"undo"));Check(Scoring.View(snapshot).Totals[a]==80&&snapshot.Finished,"undo restores and reevaluates previous total");
+snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"edit",20,EntryId:snapshot.Entries[0].Id));Check(!snapshot.Finished,"correcting current total reopens game");
+var penalties=Scoring.Create(Guid.NewGuid(),"Penalties",["A","B"],"low","target",targetScore:20,playStyle:"free");penalties=Scoring.Apply(penalties,new(penalties.Version,"score",20,PlayerId:penalties.Players[0].Id));Check(penalties.Finished&&Scoring.View(penalties).WinnerIds.SequenceEqual([penalties.Players[1].Id]),"threshold ending independent of winner rule");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Impossible",["A","B"],"high","target",targetScore:1000001,scoreMode:"total"),"unreachable total limit rejected");
 var tenant=Guid.NewGuid();var customer=Guid.NewGuid();var owner=$"{tenant:D}:{customer:D}";
 var store=new FakeDeletionStore();var directory=new FakeDirectory(tenant.ToString());var service=new AccountDeletionService(store,directory);
 async Task Reject<T>(string account,string confirmation,string name)where T:Exception{try{await service.Delete(account,confirmation);throw new Exception(name);}catch(T){checks++;}}
