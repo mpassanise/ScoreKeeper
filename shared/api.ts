@@ -1,11 +1,11 @@
 export type Player={id:string;name:string};
 export type Entry={id:string;playerId:string;points:number};
-export type Rules={endCondition?:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number};
+export type Rules={playStyle?:"turns"|"free";scoreMode?:"add"|"total";presetId?:string;presetVersion?:number;endCondition?:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number};
 export type Game=Rules & {id:string;name:string;players:Player[];winner:"high"|"low";entries:Entry[];next:string;finished:boolean;finishReason?:"manual"|"rounds"|"target";version:number;updated:string};
 export type GameView={game:Game;totals:Record<string,number>;winnerIds:string[]};
 export type GameSummary=Pick<Game,"id"|"name"|"players"|"winner"|"finished"|"version"|"updated"> & {turnCount:number};
 export type Action={action:"score"|"edit"|"select"|"undo"|"finish"|"resume";points?:number;playerId?:string;entryId?:string};
-export type AccountStatus={scoringRulesEnabled?:boolean;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
+export type AccountStatus={scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string){super(message)}}
 export class ScorekeeperApi{
