@@ -1,8 +1,12 @@
+## Latest release
+
+Guest play, fixed-round and target-score endings are implemented for web and Expo. See [activation and verification](docs/ROADMAP_RELEASE.md) and [identity-provider setup](docs/IDENTITY_PROVIDERS.md) for the Azure/mobile steps still needed.
+
 # Scorekeeper
 
 React web scoresheet, shared C# scoring API, and React Native/Expo mobile app.
 
-- `app/`: web client. Original browser-local mode remains the default until Azure configuration is supplied. Configured cloud mode uses the same API as mobile.
+- `app/`: web client with guest device-local saves and optional Azure account sync. Guest play is available whether or not Azure is configured.
 - `backend/Scorekeeper.Core/`: authoritative scoring rules.
 - `backend/Scorekeeper.Api/`: .NET 10 isolated Azure Functions with External ID token validation and Azure SQL persistence.
 - `backend/Scorekeeper.Tests/`: executable scoring checks.

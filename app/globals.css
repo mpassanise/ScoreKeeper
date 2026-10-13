@@ -8,3 +8,5 @@
 .account-actions{display:flex;gap:8px}.site-footer{display:flex;justify-content:center;gap:24px;padding:24px;color:#385a61;font-size:14px}.site-footer a,.legal a{text-decoration:underline;text-underline-offset:3px}.danger{background:#af3e3e;color:white;border:0;border-radius:10px;padding:14px;font-weight:700}.danger:disabled,button:disabled{cursor:not-allowed;opacity:.55}.legal{max-width:760px;margin:0 auto;padding:40px 24px 60px;line-height:1.7}.legal h1{font-size:36px;margin:22px 0}.legal h2{font-size:22px;margin:28px 0 8px}.legal p{margin:12px 0}.legal ul,.legal ol{padding-left:24px;list-style:revert}.legal .card{padding:24px}.legal .eyebrow{color:#417b80}.legal nav a{font-weight:700}
 
 .brand-icon{display:block;width:40px;height:40px;flex-shrink:0;border-radius:9px}.top .brand{flex-shrink:0}@media(max-width:380px){.top{padding:0 12px}.brand{gap:7px;font-size:17px}.brand-icon{width:34px;height:34px}.account-actions{gap:5px}.account-actions .outline{padding:7px}}
+
+select { width:100%; padding:14px; border:1px solid #ccdadd; border-radius:10px; background:white; color:#17252a; font:inherit; }

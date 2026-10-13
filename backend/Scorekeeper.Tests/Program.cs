@@ -18,6 +18,22 @@ g=Scoring.Apply(g,new(g.Version,"edit",24,EntryId:g.Entries[0].Id));Check(Scorin
 var low=Scoring.Create(Guid.NewGuid(),"Golf",["A","B"],"low");low=Scoring.Apply(low,new(low.Version,"score",7));low=Scoring.Apply(low,new(low.Version,"score",4));low=Scoring.Apply(low,new(low.Version,"finish"));Check(Scoring.View(low).WinnerIds.SequenceEqual([low.Players[1].Id]),"low winner");
 Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Game",["Mike"," mike "],"high"),"duplicate names rejected");
 Throws<ArgumentException>(()=>Scoring.Validate(g with{Next=Guid.NewGuid()}),"invalid imports rejected");
+// New game endings, round fairness and correction after automatic completion.
+var rounds=Scoring.Create(Guid.NewGuid(),"Rounds",["A","B"],"high","rounds",1);
+rounds=Scoring.Apply(rounds,new(rounds.Version,"score",5));Check(!rounds.Finished,"wait for every player");
+rounds=Scoring.Apply(rounds,new(rounds.Version,"select",PlayerId:rounds.Players[0].Id));
+rounds=Scoring.Apply(rounds,new(rounds.Version,"score",5));Check(!rounds.Finished,"extra turn is not a full round");
+rounds=Scoring.Apply(rounds,new(rounds.Version,"score",10));Check(rounds.Finished&&Scoring.View(rounds).WinnerIds.Length==2,"complete round supports ties");
+rounds=Scoring.Apply(rounds,new(rounds.Version,"undo"));Check(!rounds.Finished&&rounds.Next==rounds.Players[1].Id,"undo reopens completed round");
+var target=Scoring.Create(Guid.NewGuid(),"Target",["A","B"],"high","target",targetScore:20);
+target=Scoring.Apply(target,new(target.Version,"score",25));Check(target.Finished&&target.Entries.Length==1,"target ends immediately on overshoot");
+Throws<ArgumentException>(()=>Scoring.Apply(target,new(target.Version,"resume")),"limit cannot be resumed while met");
+target=Scoring.Apply(target,new(target.Version,"edit",10,EntryId:target.Entries[0].Id));Check(!target.Finished,"edit below target reopens");
+target=Scoring.Apply(target,new(target.Version,"edit",20,EntryId:target.Entries[0].Id));Check(target.Finished,"edit to target ends");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"low","target",targetScore:20),"low score target rejected");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high","rounds",0),"zero rounds rejected");
+var legacy=System.Text.Json.JsonSerializer.Deserialize<Game>("{\"Id\":\""+Guid.NewGuid()+"\",\"Name\":\"Old\",\"Players\":[],\"Winner\":\"high\",\"Entries\":[],\"Next\":\""+Guid.NewGuid()+"\",\"Finished\":false,\"Version\":1,\"Updated\":\"2026-10-01T00:00:00Z\"}");
+Check(legacy?.EndCondition=="manual","legacy JSON defaults to manual endings");
 var tenant=Guid.NewGuid();var customer=Guid.NewGuid();var owner=$"{tenant:D}:{customer:D}";
 var store=new FakeDeletionStore();var directory=new FakeDirectory(tenant.ToString());var service=new AccountDeletionService(store,directory);
 async Task Reject<T>(string account,string confirmation,string name)where T:Exception{try{await service.Delete(account,confirmation);throw new Exception(name);}catch(T){checks++;}}
