@@ -29,3 +29,11 @@ Authenticated `POST /api/account/delete` accepts only `{ "confirmation": "DELETE
 Pending/completed accounts receive HTTP 410 from game endpoints. SQL owner locks serialize game writes against deletion recording and cleanup. Completed tombstones are retained for approximately 30 days, and accepted access-token lifetimes are limited to 24 hours. Account endpoints still authenticate and permit deletion retries with valid tokens.
 
 Server-only Graph configuration and the required SQL migration are documented in [ACCOUNT_DELETION_SETUP.md](ACCOUNT_DELETION_SETUP.md). Graph client credentials must never enter client bundles.
+
+## Configurable rules (version 2)
+
+Create/import stores `playStyle: "turns" | "free"`, `scoreMode: "add" | "total"`, `endCondition: "manual" | "rounds" | "target"`, optional `roundLimit`, `targetScore`, `presetId` and `presetVersion`. Legacy missing fields default to turns/add/manual. Fixed rounds require turn-based play. Target-score ending may be combined with highest or lowest score wins; the threshold itself is always reached at or above a positive limit. For total entry, a limit cannot exceed the per-entry maximum of 1,000,000.
+
+Free-for-all `score` commands must supply an explicit valid `playerId`; the API retains that player instead of rotating. Total mode uses each player's latest recorded entry instead of summing entries. Undo and edits recalculate from the stored history. Preset metadata is provenance; the API never resolves rules dynamically from a catalog.
+
+`GET /account` also advertises `scoringRulesEnabled: true` and `scoringRulesVersion: 2`. New clients require version 2 before advanced cloud games can be created or imported. No SQL schema migration is needed; rules remain inside each game's JSON state.

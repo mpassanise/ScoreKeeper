@@ -2,6 +2,8 @@
 
 ## Implemented
 
+- Turn-based/free-for-all play, additive/current-total scoring and configurable presets; see [scoring model and future strategies](SCORING_MODEL.md).
+
 - Web and Expo guest play with device-local saves and restoration of the last open guest game.
 - Explicit import into a signed-in account; local originals remain intact. Conflicting IDs preserve the existing account game.
 - Winner rule remains highest or lowest score. Game ending is separate: manual, fixed rounds, or first to a target (highest-score games).
@@ -14,7 +16,7 @@
 ## Activation order
 
 1. Publish the website. Guest play and guest ending rules work without a backend deployment.
-2. Deploy `backend/Scorekeeper.Api` to the existing `scorekeeper-api` Function App using the working Azure deployment procedure. Preserve environment variables and database settings. `/account` now includes `scoringRulesEnabled: true`; both clients hide account ending options until this flag is returned. Sign out/in or reopen the app after updating the API.
+2. Deploy `backend/Scorekeeper.Api` to the existing `scorekeeper-api` Function App using the working Azure deployment procedure. Preserve environment variables and database settings. `/account` now includes `scoringRulesEnabled: true` and `scoringRulesVersion: 2`; both clients hide advanced account rules until version 2 is returned. Sign out/in or reopen the app after updating the API.
 3. Install mobile dependencies using `npm ci` inside `mobile`, then build a new Expo binary (`eas build --platform ios --profile preview` for device testing, or `--profile production` for TestFlight/App Store distribution). AsyncStorage adds a native dependency, so this needs a new binary, not just a website deployment.
 4. Complete the tenant/provider setup in [IDENTITY_PROVIDERS.md](IDENTITY_PROVIDERS.md).
 
