@@ -37,3 +37,7 @@ Create/import stores `playStyle: "turns" | "free"`, `scoreMode: "add" | "total"`
 Free-for-all `score` commands must supply an explicit valid `playerId`; the API retains that player instead of rotating. Total mode uses each player's latest recorded entry instead of summing entries. Undo and edits recalculate from the stored history. Preset metadata is provenance; the API never resolves rules dynamically from a catalog.
 
 `GET /account` also advertises `scoringRulesEnabled: true` and `scoringRulesVersion: 2`. New clients require version 2 before advanced cloud games can be created or imported. No SQL schema migration is needed; rules remain inside each game's JSON state.
+
+## Start/end metadata
+
+Game and saved-game summaries include nullable `startedAt` and `endedAt` ISO timestamps. Create sets the start on the server; actions never change it. Manual/automatic completion sets the end. Edits that leave a game finished preserve its end, while reopening clears it. Import preserves both supplied timestamps. Missing legacy timestamps remain null; `updated` stays the last-write timestamp and must not be treated as a start date. Deploy the updated API to activate this metadata for account games. Existing SQL JSON storage needs no migration.

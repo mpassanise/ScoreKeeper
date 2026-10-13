@@ -1,7 +1,7 @@
 namespace Scorekeeper.Core;
 public record Player(Guid Id, string Name);
 public record Entry(Guid Id, Guid PlayerId, int Points);
-public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null);
+public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null, DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null);
 public record GameView(Game Game, Dictionary<Guid,long> Totals, Guid[] WinnerIds);
 public record Command(long ExpectedVersion, string Action, int? Points = null, Guid? PlayerId = null, Guid? EntryId = null);
 public static class Scoring
@@ -10,7 +10,8 @@ public static class Scoring
  {
   if(names is null || names.Any(n=>n is null))throw new ArgumentException("Player names are required.");
   var players=names.Select(n=>new Player(Guid.NewGuid(),n.Trim())).ToArray();
-  var game=new Game(id,(name??"").Trim(),players,winner,[],players.FirstOrDefault()?.Id??Guid.Empty,false,1,DateTimeOffset.UtcNow,endCondition,roundLimit,targetScore,null,playStyle,scoreMode,presetId,presetVersion);
+  var now=DateTimeOffset.UtcNow;
+  var game=new Game(id,(name??"").Trim(),players,winner,[],players.FirstOrDefault()?.Id??Guid.Empty,false,1,now,endCondition,roundLimit,targetScore,null,playStyle,scoreMode,presetId,presetVersion,now,null);
   Validate(game);return game;
  }
  public static void Validate(Game g)
@@ -28,6 +29,7 @@ public static class Scoring
   if(g.EndCondition=="target" && g.ScoreMode=="total" && g.TargetScore>1000000)throw new ArgumentException("A score limit for current totals cannot exceed 1000000.");
   if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >10000000000))throw new ArgumentException("Target score must be a positive whole number up to 10000000000.");
   if(g.FinishReason is not (null or "manual" or "rounds" or "target"))throw new ArgumentException("Invalid finish reason.");
+  if(g.EndedAt is not null && !g.Finished)throw new ArgumentException("An active game cannot have an end time.");
   var ids=g.Players.Select(p=>p.Id).ToHashSet();
   if(!ids.Contains(g.Next)||g.Entries.Length>10000||g.Entries.Any(e=>e is null || e.Id==Guid.Empty||!ids.Contains(e.PlayerId)||Math.Abs((long)e.Points)>1000000)||g.Entries.Select(e=>e.Id).Distinct().Count()!=g.Entries.Length)throw new ArgumentException("Invalid score history or next player.");
  }
@@ -60,7 +62,8 @@ public static class Scoring
    default:throw new ArgumentException("Unknown game action.");
   }
   if(c.Action is "score" or "edit" or "undo")changed=AutoEnd(changed);
-  changed=changed with{Version=g.Version+1,Updated=DateTimeOffset.UtcNow};Validate(changed);return changed;
+  var now=DateTimeOffset.UtcNow;
+  changed=changed with{Version=g.Version+1,Updated=now,EndedAt=changed.Finished?(g.Finished?g.EndedAt:now):null};Validate(changed);return changed;
  }
  public static long Total(Game g,Guid playerId)=>g.ScoreMode=="total"?g.Entries.LastOrDefault(e=>e.PlayerId==playerId)?.Points??0:g.Entries.Where(e=>e.PlayerId==playerId).Sum(e=>(long)e.Points);
  public static Game AutoEnd(Game g)
