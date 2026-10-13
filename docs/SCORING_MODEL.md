@@ -13,7 +13,7 @@ The score-limit trigger is independent of the winner rule: a penalty game can en
 
 ## Presets
 
-New games offer **Custom** and **Scrabble**. The game-name field starts blank and remains unchanged when switching presets. Player entry is always visible and editable.
+New games offer **Custom** and **Scrabble**. The game-name field starts blank for Custom. Selecting Scrabble fills it with “Scrabble”; the name remains editable. Player entry is always visible and editable.
 
 | Preset | Form behavior | Scoring |
 |---|---|---|
@@ -48,3 +48,11 @@ Add a separate tested rule only when it changes score interpretation, turn eligi
 6. **Teams and custom presets:** Team ownership and aggregation; user-saved copies of a rule configuration.
 
 Each family needs create/score/edit/undo/import tests and parity between the local engine and authoritative C# API before a preset claims that behavior.
+
+## Game timestamps
+
+`startedAt` is recorded when a game is created by pressing Start game. `endedAt` is recorded on manual or automatic completion. UTC ISO timestamps are stored in the existing game JSON and shown in the viewer’s local timezone, including the start date/time on saved-game rows.
+
+Scoring, edits and imports preserve the original start timestamp. Edits to a game that remains finished preserve its end timestamp. Resuming or undoing completion clears the end timestamp; completing again records a new one. Older games have unknown timestamps and are labeled “Start time not recorded”; `updated` is never used as a guessed start date.
+
+The updated Azure API must be deployed to record/return timestamps for account games. No SQL migration is required. Guest games record them locally. The iPhone client needs a new build.

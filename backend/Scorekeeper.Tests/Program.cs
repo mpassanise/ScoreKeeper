@@ -45,6 +45,16 @@ snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"undo"));Check(Scoring.View
 snapshot=Scoring.Apply(snapshot,new(snapshot.Version,"edit",20,EntryId:snapshot.Entries[0].Id));Check(!snapshot.Finished,"correcting current total reopens game");
 var penalties=Scoring.Create(Guid.NewGuid(),"Penalties",["A","B"],"low","target",targetScore:20,playStyle:"free");penalties=Scoring.Apply(penalties,new(penalties.Version,"score",20,PlayerId:penalties.Players[0].Id));Check(penalties.Finished&&Scoring.View(penalties).WinnerIds.SequenceEqual([penalties.Players[1].Id]),"threshold ending independent of winner rule");
 Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Impossible",["A","B"],"high","target",targetScore:1000001,scoreMode:"total"),"unreachable total limit rejected");
+var timed=Scoring.Create(Guid.NewGuid(),"Timed",["A","B"],"high","target",targetScore:10);
+var started=timed.StartedAt;Check(started is not null&&started==timed.Updated&&timed.EndedAt is null,"creation records start only");
+timed=Scoring.Apply(timed,new(timed.Version,"score",10));var ended=timed.EndedAt;Check(ended is not null&&timed.StartedAt==started,"automatic finish records end and preserves start");
+timed=Scoring.Apply(timed,new(timed.Version,"edit",11,EntryId:timed.Entries[0].Id));Check(timed.EndedAt==ended,"editing finished scores preserves end");
+timed=Scoring.Apply(timed,new(timed.Version,"undo"));Check(timed.EndedAt is null&&timed.StartedAt==started,"undo completion clears end");
+timed=Scoring.Apply(timed,new(timed.Version,"finish"));Check(timed.EndedAt is not null,"manual finish records end");
+timed=Scoring.Apply(timed,new(timed.Version,"resume"));Check(timed.EndedAt is null&&timed.StartedAt==started,"resume clears end and preserves start");
+var roundTrip=System.Text.Json.JsonSerializer.Deserialize<Game>(System.Text.Json.JsonSerializer.Serialize(timed));Check(roundTrip?.StartedAt==started,"metadata survives import JSON round-trip");
+Check(legacy?.StartedAt is null && legacy?.EndedAt is null,"legacy games do not fabricate timestamps");
+Throws<ArgumentException>(()=>Scoring.Validate(timed with{EndedAt=DateTimeOffset.UtcNow}),"active game cannot have end timestamp");
 var tenant=Guid.NewGuid();var customer=Guid.NewGuid();var owner=$"{tenant:D}:{customer:D}";
 var store=new FakeDeletionStore();var directory=new FakeDirectory(tenant.ToString());var service=new AccountDeletionService(store,directory);
 async Task Reject<T>(string account,string confirmation,string name)where T:Exception{try{await service.Delete(account,confirmation);throw new Exception(name);}catch(T){checks++;}}

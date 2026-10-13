@@ -5,7 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 const output=path.resolve('.sites-runtime/local-tests');mkdirSync(output,{recursive:true});
-execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/api.ts','shared/local-games.ts','shared/presets.ts','shared/game-import.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
+execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/api.ts','shared/local-games.ts','shared/presets.ts','shared/game-import.ts','shared/game-time.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
 writeFileSync(path.join(output,'package.json'),'{"type":"commonjs"}');
 const {LocalGames}=await import(pathToFileURL(path.join(output,'local-games.js')).href);
 let raw=null;const storage={read:async()=>raw,write:async value=>{raw=value}};
@@ -59,3 +59,12 @@ const checkFailure={...cloudSource,get:async()=>{throw new ApiError(503,'Unavail
 const fresh={...localCopies[0],id:randomUUID()};assert.equal((await pendingImports({read:async()=>[...localCopies,fresh]},cloudSource)).length,1,'new local games re-enable import');
 const conflictCloud={list:async()=>[],get:cloudSource.get,import:async()=>{throw new ApiError(409,'Already imported')}};await importPendingGames({read:async()=>[fresh]},conflictCloud,true,n=>remaining=n);assert.equal(remaining,0,'confirmed existing game hides import');
 console.log('Import visibility, account scope, partial failure/retry, capped lists, new games and retained originals passed.');
+
+const {formatGameTime}=await import(pathToFileURL(path.join(output,'game-time.js')).href);
+let timed=await api.create(randomUUID(),'Timed',['A','B'],'high',{endCondition:'target',targetScore:10});const started=timed.game.startedAt;assert.ok(started);assert.equal(timed.game.endedAt,null);assert.equal(started,timed.game.updated);
+timed=await api.act(timed.game,{action:'score',points:10});const ended=timed.game.endedAt;assert.ok(ended);assert.equal(timed.game.startedAt,started);
+timed=await api.act(timed.game,{action:'edit',entryId:timed.game.entries[0].id,points:11});assert.equal(timed.game.endedAt,ended,'edit after finish preserves end');
+timed=await api.act(timed.game,{action:'undo'});assert.equal(timed.game.endedAt,null,'undo completion clears end');assert.equal(timed.game.startedAt,started);
+timed=await api.act(timed.game,{action:'finish'});assert.ok(timed.game.endedAt);timed=await api.act(timed.game,{action:'resume'});assert.equal(timed.game.endedAt,null);assert.equal((await api.get(timed.game.id)).game.startedAt,started,'timestamps persist across reopening');
+const unknown={...timed.game};delete unknown.startedAt;delete unknown.endedAt;await api.put(unknown);assert.equal((await api.get(timed.game.id)).game.startedAt,undefined,'legacy start is not inferred from updated');assert.equal(formatGameTime(undefined),null);assert.equal(formatGameTime('broken'),null);assert.ok(formatGameTime(started));
+console.log('Game start/end lifecycle, immutable start, completion corrections, legacy timestamps and date formatting passed.');
