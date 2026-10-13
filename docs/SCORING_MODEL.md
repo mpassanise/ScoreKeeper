@@ -13,24 +13,18 @@ The score-limit trigger is independent of the winner rule: a penalty game can en
 
 ## Presets
 
-| Preset | Play style | Score entry | Winner | Ending |
-|---|---|---|---|---|
-| Custom game | Turn-based | Add | Highest | Manual |
-| Scrabble | Turn-based | Add | Highest | Manual |
-| Yahtzee scorekeeper | Turn-based | Add | Highest | 13 rounds |
-| UNO | Free-for-all | Add | Highest | 500 points |
-| Golf · 18 holes | Turn-based | Add | Lowest | 18 rounds |
-| Rummy scorekeeper | Free-for-all | Add | Highest | Manual |
-| Points race · 100 | Free-for-all | Add | Highest | 100 points |
-| Penalty points | Free-for-all | Add | Lowest | Manual |
-| Running totals | Free-for-all | Current total | Highest | Manual |
+New games offer **Custom** and **Scrabble**. The game-name field starts blank and remains unchanged when switching presets. Player entry is always visible and editable.
 
-Named game presets are scorekeeping defaults, not full game-rule engines. Scrabble tile/word legality and endgame adjustments are handled by players. Yahtzee category validity, upper-section bonuses, extra Yahtzees and joker rules are handled on the scorecard; include earned bonus points in the recorded score. UNO receives the hand winner's awarded points after a hand. Golf permits a custom 9-hole round limit. Rummy variants differ, so its ending stays manual by default.
+| Preset | Form behavior | Scoring |
+|---|---|---|
+| Custom | All scoring controls are editable below name and players | Choose play style, score entry, winner and ending |
+| Scrabble | Hide scoring controls and show a written summary | Turn-based, add points, highest total wins, manual finish |
 
-Verified publisher references:
-- Scrabble: https://instructions.hasbro.com/en-us/instruction/Scrabble-Game
-- Yahtzee: https://instructions.hasbro.com/en-ca/instruction/yahtzee-classic
-- UNO: https://shop.mattel.com/pages/games-uno-braille-rules
+Switching to Scrabble does not erase the Custom configuration. Switching back restores it. A Scrabble game always saves the fixed Scrabble rules, even if the user previously selected different Custom settings. Selecting fixed rounds switches play style to turn-based; choosing free-for-all changes a fixed-round ending to manual. Limits are shown only when relevant.
+
+Scrabble is a scorekeeping preset. Tile/word legality and endgame tile adjustments are handled by players. Previously saved games using removed presets retain their recorded rules and can still be resumed.
+
+Publisher reference: https://instructions.hasbro.com/en-us/instruction/Scrabble-Game
 
 ## History and compatibility
 
