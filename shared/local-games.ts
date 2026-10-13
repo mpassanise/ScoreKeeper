@@ -1,3 +1,4 @@
+import {validateTargetScore,validateScoreLimit} from './score-limit';
 import {ApiError,type Action,type Game,type GameView,type Rules} from "./api";
 export const guestKey="scorekeeper-v1";
 export type Storage={read:()=>Promise<string|null>;write:(value:string)=>Promise<void>};
@@ -11,8 +12,7 @@ export function validateRules(winner:string,rules:Rules){
  if(mode==="rounds"&&rules.playStyle==="free")throw new Error("Fixed rounds require turn-based play. Choose manual or target-score ending for free-for-all.");
  if(!["manual","rounds","target"].includes(mode))throw new Error("Choose a valid ending rule.");
  if(mode==="rounds"&&(!Number.isInteger(rules.roundLimit)||rules.roundLimit!<1||rules.roundLimit!>Math.floor(10000/2)))throw new Error("Use a round limit between 1 and 5000.");
- if(mode==="target"&&rules.scoreMode==="total"&&rules.targetScore!>1000000)throw new Error("A score limit for current totals cannot exceed 1000000.");
- if(mode==="target"&&(!Number.isInteger(rules.targetScore)||rules.targetScore!<1||rules.targetScore!>10000000000))throw new Error("Target score must be a positive whole number up to 10000000000.");
+ validateTargetScore(rules);
 }
 export function totals(g:Game){return Object.fromEntries(g.players.map(p=>[p.id,g.scoreMode==="total"?(g.entries.filter(e=>e.playerId===p.id).at(-1)?.points||0):g.entries.filter(e=>e.playerId===p.id).reduce((n,e)=>n+e.points,0)]))}
 export function completedRounds(g:Game){return Math.min(...g.players.map(p=>g.entries.filter(e=>e.playerId===p.id).length))}
@@ -42,5 +42,6 @@ export class LocalGames{
  case "finish":g={...g,finished:true,finishReason:"manual"};break;
  case "resume":g=autoEnd({...g,finished:false,finishReason:undefined});if(g.finished)throw new Error("Undo or edit a score to reopen a game that reached its limit.");break;
  }
+ validateScoreLimit(g);
  const now=new Date().toISOString();return this.put({...g,version:g.version+1,updated:now,endedAt:g.finished?(originalFinished?originalEndedAt||null:now):null})}
 }
