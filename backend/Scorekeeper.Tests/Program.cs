@@ -66,6 +66,16 @@ directory.Fail=true;var result=await service.Delete(owner,"DELETE");Check(result
 directory.Fail=false;store.Fail=true;result=await service.Delete(owner,"DELETE");Check(result.Status=="pending"&&directory.Deleted&&!store.Removed,"SQL failure after identity deletion remains pending");
 store.Fail=false;result=await service.Delete(owner,"DELETE");Check(result.Status=="completed"&&store.Removed&&store.State=="completed","retry completes after identity is gone");
 var calls=directory.Calls;result=await service.Delete(owner,"DELETE");Check(result.Status=="completed"&&directory.Calls==calls,"completed retry is idempotent");
+foreach(var mode in new[]{"add","total"}){
+ var cap=Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high",playStyle:"free",scoreMode:mode);
+ var player=cap.Players[0].Id;cap=Scoring.Apply(cap,new(cap.Version,"score",9999,PlayerId:player));
+ Check(Scoring.Total(cap,player)==9999,"exact score cap accepted");
+ Throws<ArgumentException>(()=>Scoring.Apply(cap,new(cap.Version,"score",mode=="add"?1:10000,PlayerId:player)),"score overflow rejected");
+ Throws<ArgumentException>(()=>Scoring.Apply(cap,new(cap.Version,"edit",10000,EntryId:cap.Entries[0].Id)),"edit overflow rejected");
+ cap=Scoring.Apply(cap,new(cap.Version,"score",-5,PlayerId:player));Check(Scoring.Total(cap,player)==(mode=="add"?9994:-5),"negative score adjustments accepted");
+}
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:10000),"target overflow rejected");
+Check(Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:9999).TargetScore==9999,"exact target cap accepted");
 Console.WriteLine($"{checks} scoring and deletion checks passed.");
 sealed class FakeDeletionStore:IAccountDeletionStore
 {

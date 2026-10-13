@@ -40,7 +40,7 @@ snapshot=await api.act(snapshot.game,{action:'edit',entryId:snapshot.game.entrie
 snapshot=await api.act(snapshot.game,{action:'undo'});assert.equal(snapshot.totals[a],80);assert.equal(snapshot.game.finished,true,'undo recalculates from restored total');
 snapshot=await api.act(snapshot.game,{action:'edit',entryId:snapshot.game.entries[0].id,points:20});assert.equal(snapshot.game.finished,false);
 let penalties=await api.create(randomUUID(),'Penalties',['A','B'],'low',{playStyle:'free',endCondition:'target',targetScore:20});penalties=await api.act(penalties.game,{action:'score',points:20,playerId:penalties.game.players[0].id});assert.equal(penalties.game.finished,true);assert.deepEqual(penalties.winnerIds,[penalties.game.players[1].id]);
-await assert.rejects(()=>api.create(randomUUID(),'Impossible',['A','B'],'high',{scoreMode:'total',endCondition:'target',targetScore:1000001}),/cannot exceed/);
+await assert.rejects(()=>api.create(randomUUID(),'Impossible',['A','B'],'high',{scoreMode:'total',endCondition:'target',targetScore:10000}),/9,999/);
 console.log('Free scoring, total snapshots, preset validation and low-score thresholds passed.');
 console.log('Local persistence, relaunch, rules, ties, corrections, stale versions, legacy saves and storage failures passed.');
 
@@ -68,3 +68,15 @@ timed=await api.act(timed.game,{action:'undo'});assert.equal(timed.game.endedAt,
 timed=await api.act(timed.game,{action:'finish'});assert.ok(timed.game.endedAt);timed=await api.act(timed.game,{action:'resume'});assert.equal(timed.game.endedAt,null);assert.equal((await api.get(timed.game.id)).game.startedAt,started,'timestamps persist across reopening');
 const unknown={...timed.game};delete unknown.startedAt;delete unknown.endedAt;await api.put(unknown);assert.equal((await api.get(timed.game.id)).game.startedAt,undefined,'legacy start is not inferred from updated');assert.equal(formatGameTime(undefined),null);assert.equal(formatGameTime('broken'),null);assert.ok(formatGameTime(started));
 console.log('Game start/end lifecycle, immutable start, completion corrections, legacy timestamps and date formatting passed.');
+
+// Score-cap boundaries and failed-save preservation.
+for(const scoreMode of ['add','total']){
+ let capped=await api.create(randomUUID(),'Cap '+scoreMode,['A','B'],'high',{playStyle:'free',scoreMode});const playerId=capped.game.players[0].id;
+ capped=await api.act(capped.game,{action:'score',playerId,points:9999});assert.equal(capped.totals[playerId],9999);
+ const before=raw;await assert.rejects(()=>api.act(capped.game,{action:'score',playerId,points:scoreMode==='add'?1:10000}),/cannot exceed 9,999/);assert.equal(raw,before,'rejected overflow leaves persisted game untouched');
+ await assert.rejects(()=>api.act(capped.game,{action:'edit',entryId:capped.game.entries[0].id,points:10000}),/cannot exceed 9,999/);
+ capped=await api.act(capped.game,{action:'score',playerId,points:-5});assert.equal(capped.totals[playerId],scoreMode==='add'?9994:-5,'negative adjustments remain supported');
+}
+const boundary=await api.create(randomUUID(),'Boundary',['A','B'],'high',{endCondition:'target',targetScore:9999});assert.equal(boundary.game.targetScore,9999);
+await assert.rejects(()=>api.create(randomUUID(),'Too high',['A','B'],'high',{endCondition:'target',targetScore:10000}),/9,999/);
+console.log('9,999 target and total boundaries, overflow rejection, corrections and negative adjustments passed.');

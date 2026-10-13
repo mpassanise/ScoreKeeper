@@ -1,3 +1,4 @@
+import {validateTargetScore,validateScoreAction,validateScoreLimit} from './score-limit';
 export type Player={id:string;name:string};
 export type Entry={id:string;playerId:string;points:number};
 export type Rules={playStyle?:"turns"|"free";scoreMode?:"add"|"total";presetId?:string;presetVersion?:number;endCondition?:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number};
@@ -15,7 +16,7 @@ export class ScorekeeperApi{
  deleteAccount(confirmation:string){return this.request<AccountDeletion>("/account/delete",{confirmation})}
  list(){return this.request<GameSummary[]>("/games")}
  get(id:string){return this.request<GameView>(`/games/${encodeURIComponent(id)}`)}
- create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){return this.request<GameView>("/games",{id,name,players,winner,...rules})}
- act(game:Game,action:Action){return this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version})}
- import(game:Game){return this.request<GameView>("/games/import",game)}
+ create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){validateTargetScore(rules);return this.request<GameView>("/games",{id,name,players,winner,...rules})}
+ act(game:Game,action:Action){validateScoreAction(game,action);return this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version})}
+ import(game:Game){validateTargetScore(game);validateScoreLimit(game);return this.request<GameView>("/games/import",game)}
 }
