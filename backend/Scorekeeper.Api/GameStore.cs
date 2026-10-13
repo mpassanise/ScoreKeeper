@@ -44,7 +44,7 @@ public sealed class GameStore : IAccountDeletionStore
  public async Task<object[]> List(string owner)
  {
   await using var c=await Connect();await using var q=c.CreateCommand();q.CommandText="SELECT TOP (200) State FROM dbo.Games WHERE OwnerId=@owner ORDER BY Updated DESC";q.Parameters.AddWithValue("@owner",owner);
-  await using var r=await q.ExecuteReaderAsync();var games=new List<object>();while(await r.ReadAsync()){var g=JsonSerializer.Deserialize<Game>(r.GetString(0),Json)!;games.Add(new{g.Id,g.Name,g.Players,g.Winner,g.PlayStyle,g.ScoreMode,g.PresetId,g.PresetVersion,g.EndCondition,g.RoundLimit,g.TargetScore,g.Finished,g.Version,g.Updated,TurnCount=g.Entries.Length});}return games.ToArray();
+  await using var r=await q.ExecuteReaderAsync();var games=new List<object>();while(await r.ReadAsync()){var g=JsonSerializer.Deserialize<Game>(r.GetString(0),Json)!;games.Add(new{g.Id,g.Name,g.Players,g.Winner,g.PlayStyle,g.ScoreMode,g.PresetId,g.PresetVersion,g.EndCondition,g.RoundLimit,g.TargetScore,g.Finished,g.Version,g.Updated,g.StartedAt,g.EndedAt,TurnCount=g.Entries.Length});}return games.ToArray();
  }
  public async Task<bool> Insert(string owner,Game g)
  {

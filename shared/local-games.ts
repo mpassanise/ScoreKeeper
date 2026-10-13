@@ -31,8 +31,8 @@ export class LocalGames{
  async get(id:string){const g=(await this.read()).find(g=>g.id===id);if(!g)throw new Error("Game not found on this device.");return gameView(g)}
  async create(id:string,name:string,names:string[],winner:"high"|"low",rules:Rules={}){
  const clean=names.map(n=>n.trim()).filter(Boolean);if(!name.trim()||name.trim().length>60||clean.length<2||clean.length>20||clean.some(n=>n.length>30)||new Set(clean.map(n=>n.toLowerCase())).size!==clean.length)throw new Error("Enter a game name and 2–20 different player names.");validateRules(winner,rules);if(rules.endCondition==="rounds"&&rules.roundLimit!*clean.length>10000)throw new Error("Round limit exceeds the maximum 10000 turns.");
- const players=clean.map(name=>({id:this.uuid(),name}));return this.put({id,name:name.trim(),players,winner,...rules,entries:[],next:players[0].id,finished:false,version:1,updated:new Date().toISOString()})}
- async act(game:Game,a:Action){let g=(await this.get(game.id)).game;if(g.version!==game.version)throw new ApiError(409,"This game changed in another window. Refresh before scoring.");
+ const players=clean.map(name=>({id:this.uuid(),name}));const now=new Date().toISOString();return this.put({id,name:name.trim(),players,winner,...rules,entries:[],next:players[0].id,finished:false,startedAt:now,endedAt:null,version:1,updated:now})}
+ async act(game:Game,a:Action){let g=(await this.get(game.id)).game;const originalFinished=g.finished,originalEndedAt=g.endedAt;if(g.version!==game.version)throw new ApiError(409,"This game changed in another window. Refresh before scoring.");
  if(a.action==="score"||a.action==="edit"){if(!Number.isInteger(a.points)||Math.abs(a.points!)>1000000)throw new Error("Points must be a whole number between -1000000 and 1000000.")}
  switch(a.action){
  case "score":if(g.finished)throw new Error("This game has finished.");if(g.entries.length>=10000)throw new Error("Game has reached the turn limit.");const playerId=g.playStyle==="free"?a.playerId:g.next;if(!playerId||!g.players.some(p=>p.id===playerId))throw new Error("Choose the player receiving this score.");if(g.playStyle!=="free"&&a.playerId&&a.playerId!==g.next)throw new Error("Score the selected player's turn.");g={...g,entries:[...g.entries,{id:this.uuid(),playerId,points:a.points!}],next:g.playStyle==="free"?playerId:g.players[(g.players.findIndex(p=>p.id===g.next)+1)%g.players.length].id};g=autoEnd(g);break;
@@ -42,5 +42,5 @@ export class LocalGames{
  case "finish":g={...g,finished:true,finishReason:"manual"};break;
  case "resume":g=autoEnd({...g,finished:false,finishReason:undefined});if(g.finished)throw new Error("Undo or edit a score to reopen a game that reached its limit.");break;
  }
- return this.put({...g,version:g.version+1,updated:new Date().toISOString()})}
+ const now=new Date().toISOString();return this.put({...g,version:g.version+1,updated:now,endedAt:g.finished?(originalFinished?originalEndedAt||null:now):null})}
 }
