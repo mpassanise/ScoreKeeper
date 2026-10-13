@@ -26,12 +26,12 @@ public static class Scoring
   if(g.EndCondition=="rounds" && g.PlayStyle=="free")throw new ArgumentException("Fixed rounds require turn-based play.");
   if(g.EndCondition is not ("manual" or "rounds" or "target"))throw new ArgumentException("Choose a valid ending rule.");
   if(g.EndCondition=="rounds" && (g.RoundLimit is null or <1 || (long)g.RoundLimit*g.Players.Length>10000))throw new ArgumentException("Use a positive round limit within 10000 turns.");
-  if(g.EndCondition=="target" && g.ScoreMode=="total" && g.TargetScore>1000000)throw new ArgumentException("A score limit for current totals cannot exceed 1000000.");
-  if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >10000000000))throw new ArgumentException("Target score must be a positive whole number up to 10000000000.");
+  if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >9999))throw new ArgumentException("Target score must be a whole number from 1 to 9,999.");
   if(g.FinishReason is not (null or "manual" or "rounds" or "target"))throw new ArgumentException("Invalid finish reason.");
   if(g.EndedAt is not null && !g.Finished)throw new ArgumentException("An active game cannot have an end time.");
   var ids=g.Players.Select(p=>p.Id).ToHashSet();
   if(!ids.Contains(g.Next)||g.Entries.Length>10000||g.Entries.Any(e=>e is null || e.Id==Guid.Empty||!ids.Contains(e.PlayerId)||Math.Abs((long)e.Points)>1000000)||g.Entries.Select(e=>e.Id).Distinct().Count()!=g.Entries.Length)throw new ArgumentException("Invalid score history or next player.");
+  if(g.Players.Any(p=>Total(g,p.Id)>9999))throw new ArgumentException("Player totals cannot exceed 9,999. Enter a smaller score.");
  }
  public static Game Apply(Game g, Command c)
  {
