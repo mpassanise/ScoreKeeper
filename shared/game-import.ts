@@ -16,12 +16,15 @@ export async function pendingImports(local:Local,cloud:Cloud,summaries?:GameSumm
 }
 export async function importPendingGames(local:Local,cloud:Cloud,rulesEnabled:boolean,onPendingCount:(count:number)=>void){
  const pending=await pendingImports(local,cloud);onPendingCount(pending.length);
- if(!rulesEnabled&&pending.some(g=>needsAdvancedRules(g,g.winner)))throw new Error('These games use advanced rules. Please wait until account scoring has been updated before importing them.');
+ const blocked=rulesEnabled?[]:pending.filter(g=>needsAdvancedRules(g,g.winner));
+ const blockedIds=new Set(blocked.map(g=>g.id));
  let imported=0,existing=0;
- for(const game of pending){
+ for(const game of pending.filter(g=>!blockedIds.has(g.id))){
   try{await cloud.import(game);imported++}catch(error){if(error instanceof ApiError&&error.status===409)existing++;else throw error}
   // Only confirmed saves or existing-account conflicts remove the option.
   onPendingCount(pending.length-imported-existing);
  }
- return {imported,existing};
+ return {imported,existing,blocked:blocked.length};
 }
+
+export function importSummary(result:{imported:number;existing:number;blocked:number}){return [result.imported?`${result.imported} ${result.imported===1?"game added":"games added"} to your account.`:result.blocked?"No games were added.":"These games are already in your account.",result.blocked?`${result.blocked} ${result.blocked===1?"game uses":"games use"} scoring rules that aren't available for account games yet. ${result.blocked===1?"It remains":"They remain"} saved on this device.`:"Local copies were kept."].join(" ")}
