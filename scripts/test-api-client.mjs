@@ -35,3 +35,38 @@ assert.throws(()=>api.act(game,{action:'score',points:10000}),/9,999/);
 assert.throws(()=>api.create('new','Too high',['A','B'],'high',{endCondition:'target',targetScore:10000}),/9,999/);
 assert.equal(calls.length,previousCalls,'invalid scores and targets are rejected before any server request');
 console.log('Cloud client rejects over-limit totals and targets before sending.');
+
+// Drive the real request timers without waiting for a cold-start budget in CI.
+const {mock}=await import('node:test');
+const {setImmediate:nextTurn}=await import('node:timers/promises');
+mock.timers.enable({apis:['setTimeout']});
+try{
+ let requests=0,signal;
+ globalThis.fetch=async(_url,options)=>{requests++;signal=options.signal;return new Promise(()=>{})};
+ const slowRead=api.list();
+ await nextTurn();mock.timers.tick(8000);await nextTurn();
+ assert.equal(requests,1);assert.equal(signal.aborted,false,'a cold read must survive the old eight-second cutoff');
+ mock.timers.tick(22000);await nextTurn();
+ assert.equal(signal.aborted,true,'timed-out network request is aborted');
+ mock.timers.tick(1000);await nextTurn();assert.equal(requests,2,'safe read retries after a timed-out request');
+ mock.timers.tick(30000);await nextTurn();mock.timers.tick(2000);await nextTurn();
+ const exhausted=assert.rejects(slowRead,e=>e instanceof ApiError&&e.code==='REQUEST_TIMEOUT');
+ mock.timers.tick(30000);await exhausted;assert.equal(requests,3,'read retries are bounded');
+ requests=0;
+ const write=api.act(game,{action:'undo'});
+ const writeFailure=assert.rejects(write,/change may already be saved/);
+ await nextTurn();mock.timers.tick(30000);await writeFailure;
+ assert.equal(requests,1,'a timed-out score mutation is never replayed');
+ requests=0;
+ globalThis.fetch=async()=>{requests++;return requests===1?{ok:false,status:503,json:async()=>({error:'Starting',code:'DATABASE_WAKING',requestId:'trace'})}:{ok:true,json:async()=>[]}};
+ const resume=api.list();await nextTurn();mock.timers.tick(1000);await nextTurn();
+ assert.deepEqual(await resume,[]);assert.equal(requests,2,'transient SQL availability errors recover');
+ requests=0;globalThis.fetch=async()=>{requests++;return{ok:false,status:503,json:async()=>({error:'Database unavailable',code:'DATABASE_UNAVAILABLE',requestId:'support-reference'})}};
+ await assert.rejects(api.list(),/support-reference/);assert.equal(requests,1,'configuration failures are not retried');
+ requests=0;globalThis.fetch=async()=>{requests++;return{ok:false,status:401,json:async()=>({error:'Invalid token'})}};
+ await assert.rejects(api.list(),e=>e.status===401);assert.equal(requests,1,'invalid credentials are not retried');
+ const waitingToken=new ScorekeeperApi('https://api.example.test',async()=>new Promise(()=>{}));
+ const tokenFailure=assert.rejects(waitingToken.list(),/Sign-in token refresh timed out/);
+ mock.timers.tick(30000);await tokenFailure;assert.equal(requests,1,'token timeout never reaches the API');
+}finally{mock.timers.reset()}
+console.log('Cold-start, bounded retry, token timeout and write-safety checks passed.');
