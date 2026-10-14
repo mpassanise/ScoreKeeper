@@ -27,14 +27,19 @@ export function autoEnd(g:Game):Game{
 }
 export function gameView(g:Game):GameView{const scores=totals(g);const best=g.winner==="high"?Math.max(...Object.values(scores)):Math.min(...Object.values(scores));return {game:g,totals:scores,winnerIds:g.finished&&g.entries.length?g.players.filter(p=>scores[p.id]===best).map(p=>p.id):[]}}
 export function rulesLabel(g:Game){const ending= g.endCondition==="rounds"?`Round ${Math.min(completedRounds(g)+1,g.roundLimit!)} of ${g.roundLimit}`:g.endCondition==="target"?`Score limit ${g.targetScore} · ${g.targetEnd==="round"?"Ends at end of round":"Ends immediately"}`:"Finish whenever you're ready";return `${g.playStyle==="free"?"Free-for-all":"Turn-based"} · ${g.scoreMode==="total"?"Enter current totals":"Add points"} · ${ending}`}
+export function validateGameCreation(name:string,names:string[],winner:"high"|"low",rules:Rules={}){
+ const clean=names.map(n=>n.trim()).filter(Boolean);if(!name.trim()||name.trim().length>60||clean.length<2||clean.length>20||clean.some(n=>n.length>30)||new Set(clean.map(n=>n.toLowerCase())).size!==clean.length)throw new Error("Enter a game name and 2–20 different player names.");validateRules(winner,rules);if(rules.endCondition==="rounds"&&rules.roundLimit!*clean.length>10000)throw new Error("Round limit exceeds the maximum 10000 turns.");
+ return clean;
+}
 export class LocalGames{
  constructor(private storage:Storage,private uuid:()=>string){}
  async read():Promise<Game[]>{const raw=await this.storage.read();let parsed:unknown;try{parsed=JSON.parse(raw||"[]")}catch{throw new Error("Saved games could not be read. Your original data has been kept.")};if(!Array.isArray(parsed)||parsed.some(g=>!g||!Array.isArray(g.players)||!Array.isArray(g.entries)||typeof g.id!=="string"))throw new Error("Saved games could not be read. Your original data has been kept.");return parsed.map(g=>({...g,version:g.version||1,updated:typeof g.updated==="number"?new Date(g.updated).toISOString():g.updated}))}
  async put(game:Game){const games=await this.read();await this.storage.write(JSON.stringify([game,...games.filter(g=>g.id!==game.id)]));return gameView(game)}
+ async markDeviceOnly(id:string,deviceOnly:boolean){const g=(await this.get(id)).game;return this.put({...g,deviceOnly})}
  async list(){return(await this.read()).map(g=>({...g,turnCount:g.entries.length})).sort((a,b)=>Date.parse(b.updated)-Date.parse(a.updated))}
  async get(id:string){const g=(await this.read()).find(g=>g.id===id);if(!g)throw new Error("Game not found on this device.");return gameView(g)}
  async create(id:string,name:string,names:string[],winner:"high"|"low",rules:Rules={}){
- const clean=names.map(n=>n.trim()).filter(Boolean);if(!name.trim()||name.trim().length>60||clean.length<2||clean.length>20||clean.some(n=>n.length>30)||new Set(clean.map(n=>n.toLowerCase())).size!==clean.length)throw new Error("Enter a game name and 2–20 different player names.");validateRules(winner,rules);if(rules.endCondition==="rounds"&&rules.roundLimit!*clean.length>10000)throw new Error("Round limit exceeds the maximum 10000 turns.");
+ const clean=validateGameCreation(name,names,winner,rules);
  const players=clean.map(name=>({id:this.uuid(),name}));const now=new Date().toISOString();return this.put({id,name:name.trim(),players,winner,...rules,entries:[],next:players[0].id,finished:false,startedAt:now,endedAt:null,version:1,updated:now})}
  async act(game:Game,a:Action){let g=(await this.get(game.id)).game;const originalFinished=g.finished,originalEndedAt=g.endedAt;if(g.version!==game.version)throw new ApiError(409,"This game changed in another window. Refresh before scoring.");
  if(a.action==="score"||a.action==="edit"){if(!Number.isInteger(a.points)||Math.abs(a.points!)>1000000)throw new Error("Points must be a whole number between -1000000 and 1000000.")}
