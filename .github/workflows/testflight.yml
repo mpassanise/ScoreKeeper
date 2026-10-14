@@ -1,0 +1,102 @@
+name: Build iPhone for TestFlight
+run-name: iPhone build${{ inputs.submit_to_testflight && ' + TestFlight upload' || ' only' }} · ${{ github.actor }}
+on:
+  workflow_dispatch:
+    inputs:
+      submit_to_testflight:
+        description: Upload the finished build to TestFlight
+        type: boolean
+        required: true
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: scorekeeper-ios-production
+  cancel-in-progress: false
+jobs:
+  ios:
+    name: Build and optionally upload iPhone app
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: mobile
+        shell: bash
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+      SUBMIT_TO_TESTFLIGHT: ${{ inputs.submit_to_testflight }}
+    steps:
+      - name: Check out selected commit
+        uses: actions/checkout@v4
+      - name: Check required configuration
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run this workflow from the main branch after merging your changes."
+            exit 1
+          fi
+          if [[ -z "$EXPO_TOKEN" ]]; then
+            echo "::error::Add the EXPO_TOKEN repository secret in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          if [[ "$SUBMIT_TO_TESTFLIGHT" == "true" && ! "$ASC_APP_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Add the ASC_APP_ID repository variable with the numeric Apple ID from App Store Connect > App Information."
+            exit 1
+          fi
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: '24.13.0'
+          token: ${{ secrets.EXPO_TOKEN }}
+      - name: Install dependencies
+        run: npm ci
+      - name: Check TypeScript
+        run: npm run typecheck
+      - name: Configure TestFlight destination for this run
+        if: ${{ inputs.submit_to_testflight }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const config = JSON.parse(fs.readFileSync('eas.json', 'utf8'));
+          config.submit ??= {};
+          config.submit.production ??= {};
+          config.submit.production.ios ??= {};
+          config.submit.production.ios.ascAppId = process.env.ASC_APP_ID;
+          fs.writeFileSync('eas.json', JSON.stringify(config, null, 2) + '\n');
+          NODE
+      - name: Build iPhone app on EAS
+        id: build
+        run: |
+          eas build --platform ios --profile production --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const result = JSON.parse(fs.readFileSync(path.join(process.env.RUNNER_TEMP, 'eas-build.json'), 'utf8'));
+          const builds = Array.isArray(result) ? result : [result];
+          const build = builds.find(item => item.platform === 'IOS');
+          if (!build || build.status !== 'FINISHED' || !/^[0-9a-f-]{36}$/i.test(build.id)) {
+            throw new Error('EAS did not return a successfully finished iPhone build. No submission will be started.');
+          }
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `build_id=${build.id}\n`);
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## iPhone build completed\n\nBuild ID: ${build.id}\n\n[View build](https://expo.dev/accounts/mpassanise-dev/projects/scorekeeper/builds/${build.id})\n`);
+          NODE
+      - name: Upload this build to TestFlight
+        if: ${{ inputs.submit_to_testflight }}
+        env:
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        run: eas submit --platform ios --profile production --id "$BUILD_ID" --non-interactive --wait
+      - name: Summarize upload
+        if: ${{ success() && inputs.submit_to_testflight }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+
+          ## Uploaded to App Store Connect
+
+          Apple must process the build before it appears in TestFlight. Add it to your external tester group and submit for TestFlight beta review if required. This workflow does not submit an App Store release.
+          SUMMARY
