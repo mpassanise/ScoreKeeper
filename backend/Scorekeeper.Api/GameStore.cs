@@ -1,16 +1,22 @@
 using System.Text.Json;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.SqlClient;
 using Scorekeeper.Core;
 namespace Scorekeeper.Api;
 public sealed class AccountDeletingException : Exception;
-public sealed class GameStore : IAccountDeletionStore
+public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
 {
  public static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web);
  readonly string connectionString=TokenVerifier.Required("ScorekeeperSql");
  public static string OwnerKey(string owner)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(owner)));
- async Task<SqlConnection> Connect(){var c=new SqlConnection(connectionString);try{await c.OpenAsync();return c;}catch{await c.DisposeAsync();throw;}}
+ async Task<SqlConnection> Connect(){
+  var elapsed=Stopwatch.StartNew();var c=new SqlConnection(connectionString);
+  try{await c.OpenAsync();logger.LogInformation("Scorekeeper database connection opened in {ElapsedMs} ms",elapsed.ElapsedMilliseconds);return c;}
+  catch(Exception e){logger.LogError(e,"Scorekeeper database connection failed after {ElapsedMs} ms",elapsed.ElapsedMilliseconds);await c.DisposeAsync();throw;}
+ }
  public async Task<string?> DeletionState(string owner)
  {
   await using var c=await Connect();await using var q=c.CreateCommand();
