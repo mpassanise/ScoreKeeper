@@ -80,3 +80,15 @@ for(const scoreMode of ['add','total']){
 const boundary=await api.create(randomUUID(),'Boundary',['A','B'],'high',{endCondition:'target',targetScore:9999});assert.equal(boundary.game.targetScore,9999);
 await assert.rejects(()=>api.create(randomUUID(),'Too high',['A','B'],'high',{endCondition:'target',targetScore:10000}),/9,999/);
 console.log('9,999 target and total boundaries, overflow rejection, corrections and negative adjustments passed.');
+
+// Unsupported games must not block compatible imports or alter local originals.
+const compatible={...boundary.game,id:randomUUID(),endCondition:'manual',targetScore:undefined};
+const advanced={...compatible,id:randomUUID(),playStyle:'free'};
+const mixedGames=[compatible,advanced],mixedOriginal=JSON.stringify(mixedGames),savedImports=new Map();let attempted=[];
+const mixedLocal={read:async()=>mixedGames};
+const mixedCloud={list:async()=>[...savedImports.values()],get:async id=>{if(!savedImports.has(id))throw new ApiError(404,'Missing');return {game:savedImports.get(id)}},import:async game=>{attempted.push(game.id);savedImports.set(game.id,game);return {game}}};
+let pendingCount=-1;const firstImport=await importPendingGames(mixedLocal,mixedCloud,false,n=>pendingCount=n);
+assert.deepEqual(firstImport,{imported:1,existing:0,blocked:1});assert.deepEqual(attempted,[compatible.id]);assert.equal(pendingCount,1);assert.equal(JSON.stringify(mixedGames),mixedOriginal);
+const blockedOnly=await importPendingGames(mixedLocal,mixedCloud,false,n=>pendingCount=n);assert.deepEqual(blockedOnly,{imported:0,existing:0,blocked:1});assert.equal(attempted.length,1,'unsupported games never go to an older API');
+const retrySupported=await importPendingGames(mixedLocal,mixedCloud,true,n=>pendingCount=n);assert.deepEqual(retrySupported,{imported:1,existing:0,blocked:0});assert.equal(pendingCount,0);assert.deepEqual(attempted,[compatible.id,advanced.id]);assert.equal(JSON.stringify(mixedGames),mixedOriginal);
+console.log('Compatible imports proceed, unsupported games stay local, and refreshed support enables retry without duplicates.');
