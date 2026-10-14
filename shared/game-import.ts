@@ -14,9 +14,9 @@ export async function pendingImports(local:Local,cloud:Cloud,summaries?:GameSumm
  for(const game of missing){try{await cloud.get(game.id)}catch(error){if(error instanceof ApiError&&error.status===404)pending.push(game);else throw error}}
  return pending;
 }
-export async function importPendingGames(local:Local,cloud:Cloud,rulesEnabled:boolean,onPendingCount:(count:number)=>void){
+export async function importPendingGames(local:Local,cloud:Cloud,rulesEnabled:boolean,onPendingCount:(count:number)=>void,roundEndingEnabled=false){
  const pending=await pendingImports(local,cloud);onPendingCount(pending.length);
- const blocked=rulesEnabled?[]:pending.filter(g=>needsAdvancedRules(g,g.winner));
+ const blocked=pending.filter(g=>(!rulesEnabled&&needsAdvancedRules(g,g.winner))||(g.targetEnd==='round'&&!roundEndingEnabled));
  const blockedIds=new Set(blocked.map(g=>g.id));
  let imported=0,existing=0;
  for(const game of pending.filter(g=>!blockedIds.has(g.id))){
