@@ -1,17 +1,17 @@
 namespace Scorekeeper.Core;
 public record Player(Guid Id, string Name);
 public record Entry(Guid Id, Guid PlayerId, int Points);
-public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null, DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null);
+public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null, DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null, string TargetEnd = "immediate");
 public record GameView(Game Game, Dictionary<Guid,long> Totals, Guid[] WinnerIds);
 public record Command(long ExpectedVersion, string Action, int? Points = null, Guid? PlayerId = null, Guid? EntryId = null);
 public static class Scoring
 {
- public static Game Create(Guid id, string name, string[] names, string winner, string endCondition = "manual", int? roundLimit = null, long? targetScore = null, string playStyle = "turns", string scoreMode = "add", string? presetId = null, int? presetVersion = null)
+ public static Game Create(Guid id, string name, string[] names, string winner, string endCondition = "manual", int? roundLimit = null, long? targetScore = null, string playStyle = "turns", string scoreMode = "add", string? presetId = null, int? presetVersion = null, string targetEnd = "immediate")
  {
   if(names is null || names.Any(n=>n is null))throw new ArgumentException("Player names are required.");
   var players=names.Select(n=>new Player(Guid.NewGuid(),n.Trim())).ToArray();
   var now=DateTimeOffset.UtcNow;
-  var game=new Game(id,(name??"").Trim(),players,winner,[],players.FirstOrDefault()?.Id??Guid.Empty,false,1,now,endCondition,roundLimit,targetScore,null,playStyle,scoreMode,presetId,presetVersion,now,null);
+  var game=new Game(id,(name??"").Trim(),players,winner,[],players.FirstOrDefault()?.Id??Guid.Empty,false,1,now,endCondition,roundLimit,targetScore,null,playStyle,scoreMode,presetId,presetVersion,now,null,targetEnd);
   Validate(game);return game;
  }
  public static void Validate(Game g)
@@ -27,6 +27,8 @@ public static class Scoring
   if(g.EndCondition is not ("manual" or "rounds" or "target"))throw new ArgumentException("Choose a valid ending rule.");
   if(g.EndCondition=="rounds" && (g.RoundLimit is null or <1 || (long)g.RoundLimit*g.Players.Length>10000))throw new ArgumentException("Use a positive round limit within 10000 turns.");
   if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >9999))throw new ArgumentException("Target score must be a whole number from 1 to 9,999.");
+  if(g.TargetEnd is not ("immediate" or "round"))throw new ArgumentException("Choose a valid score-limit ending.");
+  if(g.TargetEnd=="round" && (g.EndCondition!="target" || g.PlayStyle!="turns"))throw new ArgumentException("End of round requires a score limit and turn-based play.");
   if(g.FinishReason is not (null or "manual" or "rounds" or "target"))throw new ArgumentException("Invalid finish reason.");
   if(g.EndedAt is not null && !g.Finished)throw new ArgumentException("An active game cannot have an end time.");
   var ids=g.Players.Select(p=>p.Id).ToHashSet();
@@ -44,11 +46,13 @@ public static class Scoring
     if(c.Points is null || Math.Abs((long)c.Points.Value)>1000000)throw new ArgumentException("Points must be a whole number between -1000000 and 1000000.");
     if(g.Entries.Length>=10000)throw new ArgumentException("Game has reached the turn limit.");
     var scoringPlayer=g.PlayStyle=="free"?c.PlayerId:g.Next;
+    if(RemainingTargetPlayers(g) is Player[] remaining && !remaining.Any(p=>p.Id==scoringPlayer))throw new ArgumentException("This player has completed the final round. Score a remaining player.");
     if(scoringPlayer is null || !g.Players.Any(p=>p.Id==scoringPlayer))throw new ArgumentException("Choose the player receiving this score.");
     if(g.PlayStyle=="turns" && c.PlayerId is not null && c.PlayerId!=g.Next)throw new ArgumentException("Score the selected player's turn.");
     var index=Array.FindIndex(g.Players,p=>p.Id==g.Next);
     changed=g with{Entries=[..g.Entries,new Entry(Guid.NewGuid(),scoringPlayer.Value,c.Points.Value)],Next=g.PlayStyle=="free"?scoringPlayer.Value:g.Players[(index+1)%g.Players.Length].Id};break;
    case "select":
+    if(RemainingTargetPlayers(g) is Player[] selectable && !selectable.Any(p=>p.Id==c.PlayerId))throw new ArgumentException("This player has completed the final round. Score a remaining player.");
     if(g.Finished || !g.Players.Any(p=>p is null || p.Id==c.PlayerId))throw new ArgumentException("Select a player in an active game.");
     changed=g with{Next=c.PlayerId!.Value};break;
    case "edit":
@@ -68,10 +72,23 @@ public static class Scoring
  public static long Total(Game g,Guid playerId)=>g.ScoreMode=="total"?g.Entries.LastOrDefault(e=>e.PlayerId==playerId)?.Points??0:g.Entries.Where(e=>e.PlayerId==playerId).Sum(e=>(long)e.Points);
  public static Game AutoEnd(Game g)
  {
-  var reached=g.EndCondition=="rounds" ? g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=g.RoundLimit : g.EndCondition=="target" && g.Players.Any(p=>Total(g,p.Id)>=g.TargetScore);
+  var finalRound=TargetEndRound(g);
+  var reached=g.EndCondition=="rounds" ? g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=g.RoundLimit : g.EndCondition=="target" && (g.TargetEnd=="round" ? finalRound is not null && g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=finalRound : g.Players.Any(p=>Total(g,p.Id)>=g.TargetScore));
   if(reached)return g with{Finished=true,FinishReason=g.EndCondition};
+  if(RemainingTargetPlayers(g) is Player[] remaining && remaining.Length>0 && !remaining.Any(p=>p.Id==g.Next)){
+   var start=Array.FindIndex(g.Players,p=>p.Id==g.Next);
+   var next=Enumerable.Range(0,g.Players.Length).Select(i=>g.Players[(start+i)%g.Players.Length]).First(p=>remaining.Any(r=>r.Id==p.Id));g=g with{Next=next.Id};
+  }
   return g.FinishReason is "rounds" or "target" ? g with{Finished=false,FinishReason=null}:g;
  }
+ public static int? TargetEndRound(Game g)
+ {
+  if(g.EndCondition!="target" || g.TargetEnd!="round")return null;
+  var scores=g.Players.ToDictionary(p=>p.Id,p=>0L);var counts=g.Players.ToDictionary(p=>p.Id,p=>0);
+  foreach(var e in g.Entries){counts[e.PlayerId]++;scores[e.PlayerId]=g.ScoreMode=="total"?e.Points:scores[e.PlayerId]+e.Points;if(scores[e.PlayerId]>=g.TargetScore)return counts.Values.Max();}
+  return null;
+ }
+ public static Player[]? RemainingTargetPlayers(Game g){var round=TargetEndRound(g);return round is null?null:g.Players.Where(p=>g.Entries.Count(e=>e.PlayerId==p.Id)<round).ToArray();}
  public static GameView View(Game g)
  {
   var totals=g.Players.ToDictionary(p=>p.Id,p=>Total(g,p.Id));
