@@ -76,6 +76,24 @@ foreach(var mode in new[]{"add","total"}){
 }
 Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:10000),"target overflow rejected");
 Check(Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:9999).TargetScore==9999,"exact target cap accepted");
+// Score-limit end-of-round grants each remaining player one turn.
+var final=Scoring.Create(Guid.NewGuid(),"Final round",["A","B","C"],"high","target",targetScore:20,targetEnd:"round");
+final=Scoring.Apply(final,new(final.Version,"score",20));Check(!final.Finished&&Scoring.TargetEndRound(final)==1,"threshold starts final round");
+Throws<ArgumentException>(()=>Scoring.Apply(final,new(final.Version,"select",PlayerId:final.Players[0].Id)),"completed final-round player cannot be selected again");
+final=Scoring.Apply(final,new(final.Version,"score",25));Check(!final.Finished&&final.Next==final.Players[2].Id,"another threshold does not restart final round");
+final=Scoring.Apply(final,new(final.Version,"score",0));Check(final.Finished&&Scoring.View(final).WinnerIds.SequenceEqual([final.Players[1].Id]),"remaining player can win; zero-score turn completes round");
+final=Scoring.Apply(final,new(final.Version,"undo"));Check(!final.Finished&&final.Next==final.Players[2].Id,"undo last final-round turn reopens");
+final=Scoring.Apply(final,new(final.Version,"edit",5,EntryId:final.Entries[0].Id));Check(Scoring.TargetEndRound(final)==1,"other threshold preserves final round after correction");
+final=Scoring.Apply(final,new(final.Version,"edit",5,EntryId:final.Entries[1].Id));Check(Scoring.TargetEndRound(final)==null&&!final.Finished,"correction removing all crossings cancels final round");
+final=Scoring.Apply(final,new(final.Version,"score",0));final=Scoring.Apply(final,new(final.Version,"score",15));Check(Scoring.TargetEndRound(final)==2&&!final.Finished,"later threshold starts second final round");
+final=Scoring.Apply(final,new(final.Version,"score",15));final=Scoring.Apply(final,new(final.Version,"score",20));Check(final.Finished&&Scoring.View(final).WinnerIds.Length==3,"final round uses final totals including ties");
+var roundSnapshot=Scoring.Create(Guid.NewGuid(),"Snapshots",["A","B"],"low","target",targetScore:20,scoreMode:"total",targetEnd:"round");
+roundSnapshot=Scoring.Apply(roundSnapshot,new(roundSnapshot.Version,"score",20));roundSnapshot=Scoring.Apply(roundSnapshot,new(roundSnapshot.Version,"score",10));Check(roundSnapshot.Finished&&Scoring.View(roundSnapshot).WinnerIds.SequenceEqual([roundSnapshot.Players[1].Id]),"round ending supports current totals and lowest winner");
+var last=Scoring.Create(Guid.NewGuid(),"Last player",["A","B"],"high","target",targetScore:20,targetEnd:"round");last=Scoring.Apply(last,new(last.Version,"score",0));last=Scoring.Apply(last,new(last.Version,"score",20));Check(last.Finished,"threshold on last player ends at current round boundary");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high","target",targetScore:20,playStyle:"free",targetEnd:"round"),"free-for-all round ending rejected");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high",targetEnd:"round"),"round modifier requires target ending");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high",targetEnd:"unknown"),"unknown target ending rejected");
+Check(legacy?.TargetEnd=="immediate","legacy JSON keeps immediate target ending");
 Console.WriteLine($"{checks} scoring and deletion checks passed.");
 sealed class FakeDeletionStore:IAccountDeletionStore
 {

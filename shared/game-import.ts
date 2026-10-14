@@ -2,26 +2,33 @@ import {ApiError,type Game,type GameSummary,type ScorekeeperApi} from './api';
 import type {LocalGames} from './local-games';
 import {needsAdvancedRules} from './presets';
 type Cloud=Pick<ScorekeeperApi,'list'|'get'|'import'>;
-type Local=Pick<LocalGames,'read'>;
+type Local=Pick<LocalGames,'read'> & Partial<Pick<LocalGames,'markDeviceOnly'>>;
 // Ownership is established by the authenticated API, not by a device-wide flag.
 export async function pendingImports(local:Local,cloud:Cloud,summaries?:GameSummary[]):Promise<Game[]>{
  const [games,saved]=await Promise.all([local.read(),summaries?Promise.resolve(summaries):cloud.list()]);
  const known=new Set(saved.map(g=>g.id));
- const missing=games.filter(g=>!known.has(g.id));
+ const unconfirmed=new Set<string>();
+ for(const game of games.filter(g=>g.deviceOnly&&known.has(g.id))){const accountGame=(await cloud.get(game.id)).game;if(sameSavedGame(game,accountGame))await local.markDeviceOnly?.(game.id,false);else unconfirmed.add(game.id)}
+ const missing=games.filter(g=>!known.has(g.id)||unconfirmed.has(g.id));
  if(saved.length<200)return missing;
  // The API list is capped at 200; older imported games may be outside that page.
  const pending:Game[]=[];
- for(const game of missing){try{await cloud.get(game.id)}catch(error){if(error instanceof ApiError&&error.status===404)pending.push(game);else throw error}}
+ for(const game of missing){if(unconfirmed.has(game.id)){pending.push(game);continue}try{await cloud.get(game.id)}catch(error){if(error instanceof ApiError&&error.status===404)pending.push(game);else throw error}}
  return pending;
 }
-export async function importPendingGames(local:Local,cloud:Cloud,rulesEnabled:boolean,onPendingCount:(count:number)=>void){
+export async function importPendingGames(local:Local,cloud:Cloud,rulesEnabled:boolean,onPendingCount:(count:number)=>void,roundEndingEnabled=false){
  const pending=await pendingImports(local,cloud);onPendingCount(pending.length);
- if(!rulesEnabled&&pending.some(g=>needsAdvancedRules(g,g.winner)))throw new Error('These games use advanced rules. Please wait until account scoring has been updated before importing them.');
+ const blocked=pending.filter(g=>(!rulesEnabled&&needsAdvancedRules(g,g.winner))||(g.targetEnd==='round'&&!roundEndingEnabled));
+ const blockedIds=new Set(blocked.map(g=>g.id));
  let imported=0,existing=0;
- for(const game of pending){
-  try{await cloud.import(game);imported++}catch(error){if(error instanceof ApiError&&error.status===409)existing++;else throw error}
+ for(const game of pending.filter(g=>!blockedIds.has(g.id))){
+  try{await cloud.import(game);if(game.deviceOnly)await local.markDeviceOnly?.(game.id,false);imported++}catch(error){if(error instanceof ApiError&&error.status===409){if(game.deviceOnly){const saved=(await cloud.get(game.id)).game;if(!sameSavedGame(game,saved))throw new ApiError(409,'An account copy has different scores. Your device copy was kept.');await local.markDeviceOnly?.(game.id,false)}existing++}else throw error}
   // Only confirmed saves or existing-account conflicts remove the option.
   onPendingCount(pending.length-imported-existing);
  }
- return {imported,existing};
+ return {imported,existing,blocked:blocked.length};
 }
+
+export function importSummary(result:{imported:number;existing:number;blocked:number}){return [result.imported?`${result.imported} ${result.imported===1?"game added":"games added"} to your account.`:result.blocked?"No games were added.":"These games are already in your account.",result.blocked?`${result.blocked} ${result.blocked===1?"game uses":"games use"} scoring rules that aren't available for account games yet. ${result.blocked===1?"It remains":"They remain"} saved on this device.`:"Local copies were kept."].join(" ")}
+
+function sameSavedGame(a:Game,b:Game){const content=(g:Game)=>JSON.stringify([g.id,g.name,g.players,g.winner,g.entries,g.next,g.finished,g.playStyle||'turns',g.scoreMode||'add',g.endCondition||'manual',g.roundLimit,g.targetScore,g.targetEnd||'immediate',g.presetId,g.presetVersion]);return content(a)===content(b)}

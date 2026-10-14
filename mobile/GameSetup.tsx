@@ -2,7 +2,7 @@ import {useThemeStyles} from './Theme';
 import {useRef,useState} from 'react';
 import DragHandle,{DraggablePlayer} from './DragHandle';
 import {LayoutAnimation,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
-import {changeEnding,changePlayStyle,scrabbleSummary,setupHint,type GameSetupProps} from '../shared/game-setup';
+import {changeTargetEnd,changeEnding,changePlayStyle,scrabbleSummary,setupHint,type GameSetupProps} from '../shared/game-setup';
 export default function GameSetup({presetId,onPresetChange,name,onNameChange,players,onPlayersChange,settings,onSettingsChange,onSubmit,busy,onDraggingChange}:GameSetupProps & {onDraggingChange?:(active:boolean)=>void}){
  const s=useThemeStyles(baseStyles);
  const [dragTarget,setDragTarget]=useState<number|null>(null);
@@ -25,7 +25,8 @@ export default function GameSetup({presetId,onPresetChange,name,onNameChange,pla
     <Text style={s.help}>{settings.scoreMode==='add'?'Add each entry to the player’s total.':'Replace the total with the number entered.'}</Text>
     {choices('Winner',settings.winner,[{value:'high',label:'Highest score'},{value:'low',label:'Lowest score'}],value=>onSettingsChange({...settings,winner:value}))}
     {choices('Game ends',settings.endCondition,[{value:'manual',label:'Manually'},{value:'rounds',label:'Fixed rounds'},{value:'target',label:'Score limit'}],value=>onSettingsChange(changeEnding(settings,value)))}
-    {settings.endCondition!=='manual'&&<View style={s.field}><Text style={s.label}>{settings.endCondition==='rounds'?'Number of rounds':'Score limit'}</Text><TextInput placeholderTextColor={s.help.color} accessibilityLabel={settings.endCondition==='rounds'?'Number of rounds':'Score limit'} style={s.input} keyboardType="number-pad" value={settings.limit} onChangeText={value=>{if(/^\d*$/.test(value))onSettingsChange({...settings,limit:value})}}/><Text style={s.help}>{settings.endCondition==='rounds'?'Turn-based play: every player completes each round.':`Maximum target: 9,999. Ends immediately when anyone reaches this score. ${settings.winner==='high'?'Highest':'Lowest'} total wins.`}</Text></View>}
+    {settings.endCondition!=='manual'&&<View style={s.field}><Text style={s.label}>{settings.endCondition==='rounds'?'Number of rounds':'Score limit'}</Text><TextInput placeholderTextColor={s.help.color} accessibilityLabel={settings.endCondition==='rounds'?'Number of rounds':'Score limit'} style={s.input} keyboardType="number-pad" value={settings.limit} onChangeText={value=>{if(/^\d*$/.test(value))onSettingsChange({...settings,limit:value})}}/><Text style={s.help}>{settings.endCondition==='rounds'?'Turn-based play: every player completes each round.':`Maximum target: 9,999. ${settings.targetEnd==='round'?'Every player finishes the current round once the limit is reached.':'Ends immediately when anyone reaches this score.'} ${settings.winner==='high'?'Highest':'Lowest'} total wins.`}</Text></View>}
+    {settings.endCondition==='target'&&<>{choices('When the score limit is reached',settings.targetEnd,[{value:'immediate',label:'Ends immediately'},{value:'round',label:'Ends at end of round'}],value=>onSettingsChange(changeTargetEnd(settings,value)))}<Text style={s.help}>End of round uses turn-based play so every player can finish the round.</Text></>}
    </View>}
   </View>
   <Pressable accessibilityRole="button" accessibilityState={{disabled:busy||!!hint}} disabled={busy||!!hint} style={[s.start,(busy||!!hint)&&s.disabled]} onPress={onSubmit}><Text style={s.startText}>{busy?'Starting…':'Start game'}</Text></Pressable>{hint?<Text style={s.help}>{hint}</Text>:null}
