@@ -22,7 +22,7 @@ export class ScorekeeperApi{
   const accessToken=await this.accessToken(),read=body===undefined;
   // Retry only safe reads. A timed-out write may already have committed.
   for(let attempt=0;attempt<(read?3:1);attempt++){
-   const controller=new AbortController();let timer:ReturnType<typeof setTimeout>;
+   const controller=new AbortController(),started=Date.now();let timer:ReturnType<typeof setTimeout>;
    try{
     const work=async()=>{
      const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},body:read?undefined:JSON.stringify(body),signal:controller.signal});
@@ -30,8 +30,9 @@ export class ScorekeeperApi{
      if(!response.ok){
       const data=value&&typeof value==="object"?value as Record<string,unknown>:{};
       const message=typeof data.error==="string"?data.error:"Request failed.";
+      const details=[`${read?'GET':'POST'} ${path.replace(/\/games\/[^/]+/, '/games/:id')}`,`HTTP ${response.status}`,`attempt ${attempt+1}`,`${Date.now()-started} ms`,typeof data.code==='string'?data.code:'',typeof data.stage==='string'?`stage=${data.stage}`:'',typeof data.sqlNumber==='number'?`SQL ${data.sqlNumber}`:''].filter(Boolean).join(' · ');
       const reference=typeof data.requestId==="string"?` Reference: ${data.requestId}.`:"";
-      throw new ApiError(response.status,message+reference,typeof data.code==="string"?data.code:undefined);
+      throw new ApiError(response.status,message+reference+` Details: ${details}.`,typeof data.code==="string"?data.code:undefined);
      }
      return value as T;
     };

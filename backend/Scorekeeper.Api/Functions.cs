@@ -23,6 +23,7 @@ public class Functions(TokenVerifier auth,GameStore store,ILogger<Functions> log
   var elapsed=Stopwatch.StartNew();var stage="token-validation";
   var requestId=Activity.Current?.TraceId.ToString()??Guid.NewGuid().ToString("N");
   using var scope=logger.BeginScope(new Dictionary<string,object>{{"RequestId",requestId}});
+  logger.LogInformation("Scorekeeper request started {Method} {Path}; RequestId {RequestId}",r.Method,r.Url.AbsolutePath,requestId);
   try{
    var owner=await auth.Owner(r);
    logger.LogInformation("Scorekeeper authentication completed in {ElapsedMs} ms",elapsed.ElapsedMilliseconds);
@@ -30,7 +31,7 @@ public class Functions(TokenVerifier auth,GameStore store,ILogger<Functions> log
    if(!allowDeleted&&await store.DeletionState(owner) is not null)return await Reply(r,410,new{error="Account deletion has been requested. Open Account to retry deletion or sign out."});
    stage="handler";return await action(owner);
   }
-  catch(UnauthorizedAccessException){var response=await Reply(r,401,new{error="Sign in with a valid Scorekeeper access token."});response.Headers.Add("WWW-Authenticate","Bearer");return response;}
+  catch(UnauthorizedAccessException){var response=await Reply(r,401,new{error="Sign in with a valid Scorekeeper access token.",code="TOKEN_REJECTED",requestId,stage});response.Headers.Add("WWW-Authenticate","Bearer");return response;}
   catch(AccountDeletingException){return await Reply(r,410,new{error="Account deletion has been requested. No scores were saved."});}
   catch(InvalidOperationException e)when(e.Message=="Account deletion is not configured yet."){return await Reply(r,503,new{error="Account deletion is not available right now. Your account has not been changed."});}
   catch(JsonException){return await Reply(r,400,new{error="Invalid request JSON."});}
@@ -39,9 +40,9 @@ public class Functions(TokenVerifier auth,GameStore store,ILogger<Functions> log
   catch(SqlException e){
    logger.LogError(e,"Scorekeeper SQL failure at {Stage} after {ElapsedMs} ms; SqlNumber {SqlNumber}; RequestId {RequestId}",stage,elapsed.ElapsedMilliseconds,e.Number,requestId);
    var transient=e.Number is -2 or 40613 or 40197 or 40501 or 49918 or 49919 or 49920 or 10928 or 10929;
-   return await Reply(r,503,new{error=transient?"Account database is starting or temporarily busy. Please try syncing again.":"Account database is unavailable. Please contact support with this reference.",code=transient?"DATABASE_WAKING":"DATABASE_UNAVAILABLE",requestId});
+   return await Reply(r,503,new{error=transient?"Account database is starting or temporarily busy. Please try syncing again.":"Account database is unavailable. Please contact support with this reference.",code=transient?"DATABASE_WAKING":"DATABASE_UNAVAILABLE",requestId,stage,sqlNumber=e.Number});
   }
-  catch(Exception e){logger.LogError(e,"Scorekeeper request failed at {Stage} after {ElapsedMs} ms; RequestId {RequestId}",stage,elapsed.ElapsedMilliseconds,requestId);return await Reply(r,503,new{error="Scorekeeper is temporarily unavailable. Your device has not received a confirmed save; refresh before retrying.",code="API_UNAVAILABLE",requestId});}
+  catch(Exception e){logger.LogError(e,"Scorekeeper request failed at {Stage} after {ElapsedMs} ms; RequestId {RequestId}",stage,elapsed.ElapsedMilliseconds,requestId);return await Reply(r,503,new{error="Scorekeeper is temporarily unavailable. Your device has not received a confirmed save; refresh before retrying.",code="API_UNAVAILABLE",requestId,stage});}
   finally{logger.LogInformation("Scorekeeper {Method} {Path} completed at {Stage} in {ElapsedMs} ms; RequestId {RequestId}",r.Method,r.Url.AbsolutePath,stage,elapsed.ElapsedMilliseconds,requestId);}
  }
  static async Task<T> Body<T>(HttpRequestData r)

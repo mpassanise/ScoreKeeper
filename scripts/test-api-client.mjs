@@ -70,3 +70,16 @@ try{
  mock.timers.tick(30000);await tokenFailure;assert.equal(requests,1,'token timeout never reaches the API');
 }finally{mock.timers.reset()}
 console.log('Cold-start, bounded retry, token timeout and write-safety checks passed.');
+
+globalThis.fetch=async()=>({ok:false,status:503,json:async()=>({error:'Database unavailable',code:'DATABASE_UNAVAILABLE',requestId:'diagnostic-reference',stage:'deletion-state',sqlNumber:208})});
+await assert.rejects(api.get('private-game-id'),error=>{
+ assert.match(error.message,/GET \/games\/:id/);
+ assert.match(error.message,/HTTP 503/);
+ assert.match(error.message,/stage=deletion-state/);
+ assert.match(error.message,/SQL 208/);
+ assert.match(error.message,/diagnostic-reference/);
+ assert.ok(!error.message.includes('private-game-id'));
+ assert.ok(!error.message.includes('valid-token'));
+ return true;
+});
+console.log('Support references, endpoint/status/stage/SQL diagnostics and ID/token omission passed.');

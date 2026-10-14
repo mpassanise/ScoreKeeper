@@ -57,3 +57,9 @@ An anonymous /api/games 401 only verifies the HTTP route and rejection of anonym
 5. If either fails, collect the queries above and the displayed reference. Fix the measured Azure issue rather than extending retries indefinitely.
 
 Reference: https://learn.microsoft.com/en-us/azure/azure-sql/database/serverless-tier-auto-pause-resume
+
+## Additional stage diagnostics
+
+The API logs request start, authentication metadata retrieval start/completion, token validation, SQL connection opening, and named SQL operations (`account-deletion-status`, `list-games`). The app preserves API error details in both the home notice and Account panel. Error details include sanitized endpoint, HTTP status, attempt, elapsed milliseconds, safe server stage/SQL number and request reference. Tokens and game identifiers are omitted from these details. Exception objects remain in server logs, not in API responses.
+
+Both host and isolated-worker logging explicitly enable Information for the Scorekeeper.Api category. The trace query above returns stage entries. If a start entry has no corresponding completion before timeout, inspect the next dependency and exception for that operation_Id. An old generic error without details can indicate an old mobile binary or API deployment; merge PR #11, redeploy the API and rebuild TestFlight before comparing logs.
