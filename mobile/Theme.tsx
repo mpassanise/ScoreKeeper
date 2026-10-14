@@ -1,5 +1,5 @@
 import {createContext,useContext,useEffect,useMemo,useRef,useState} from 'react';
-import {StatusBar,StyleSheet,useColorScheme} from 'react-native';
+import {StyleSheet,useColorScheme} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 export type ThemeChoice='light'|'dark'|'system';
 const ThemeContext=createContext({choice:'system' as ThemeChoice,dark:false,ready:false,error:'',setChoice:async(_choice:ThemeChoice)=>{}});
@@ -8,7 +8,7 @@ export function ThemeProvider({children}:{children:React.ReactNode}){
  useEffect(()=>{AsyncStorage.getItem('scorekeeper-theme').then(value=>{if(value==='light'||value==='dark'||value==='system')setChoiceState(value)}).catch(()=>setError('Could not load your theme preference.')).finally(()=>setReady(true))},[]);
  async function setChoice(value:ThemeChoice){if(!ready||saving.current)return;saving.current=true;setError('');try{await AsyncStorage.setItem('scorekeeper-theme',value);setChoiceState(value)}catch{setError('Could not save your theme. Please try again.')}finally{saving.current=false}}
  const dark=choice==='dark'||(choice==='system'&&system==='dark');
- return <ThemeContext.Provider value={{choice,dark,ready,error,setChoice}}><StatusBar barStyle={dark?'light-content':'dark-content'}/>{children}</ThemeContext.Provider>
+ return <ThemeContext.Provider value={{choice,dark,ready,error,setChoice}}>{children}</ThemeContext.Provider>
 }
 export function useTheme(){return useContext(ThemeContext)}
 const backgrounds:Record<string,string>={'#f4f7f8':'#101b20','white':'#19292f','#fff':'#19292f','#e8f0f1':'#243b43','#edf8f5':'#23403e','#c5e5e2':'#23403e','#123f4a':'#12343e'};
