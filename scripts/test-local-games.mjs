@@ -5,7 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 const output=path.resolve('.sites-runtime/local-tests');mkdirSync(output,{recursive:true});
-execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/api.ts','shared/local-games.ts','shared/presets.ts','shared/game-import.ts','shared/game-time.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
+execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/api.ts','shared/local-games.ts','shared/presets.ts','shared/game-import.ts','shared/game-time.ts','shared/game-start.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
 writeFileSync(path.join(output,'package.json'),'{"type":"commonjs"}');
 const {LocalGames}=await import(pathToFileURL(path.join(output,'local-games.js')).href);
 let raw=null;const storage={read:async()=>raw,write:async value=>{raw=value}};
@@ -123,4 +123,43 @@ try{
 }finally{globalThis.fetch=savedFetch}
 console.log('Target round endings: remaining turns, final winners, ties, corrections, undo, reload and API rollout passed.');
 
+}
+{
+ const {startGame,mergeDeviceGames}=await import(pathToFileURL(path.join(output,'game-start.js')).href);
+ let deviceData=null,cloudCalls=0;
+ const local=new LocalGames({read:async()=>deviceData,write:async data=>{deviceData=data}},randomUUID);
+ const base={local,signedIn:true,name:'Reliable game',players:['A','B'],winner:'high',rules:{endCondition:'manual'},uuid:randomUUID,timeoutMs:20};
+ const offline={account:async()=>{throw new Error('Offline')},create:async()=>{cloudCalls++;throw new Error('Should not post')}};
+ let result=await startGame({...base,cloud:offline});assert.equal(result.view.game.deviceOnly,true);assert.equal(cloudCalls,0);
+ let play=await local.act(result.view.game,{action:'score',points:12});assert.equal(play.totals[play.game.players[0].id],12,'fallback game stays scoreable');
+ play=await new LocalGames({read:async()=>deviceData,write:async data=>{deviceData=data}},randomUUID).get(play.game.id);assert.equal(play.game.deviceOnly,true,'fallback origin persists after relaunch');
+ const merged=mergeDeviceGames([],await local.list());assert.equal(merged[0].id,play.game.id,'fallback is visible while signed in');
+ const unsupported={account:async()=>({scoringRulesVersion:2}),create:async()=>{cloudCalls++;throw new Error('Should not post')}};
+ result=await startGame({...base,cloud:unsupported,rules:{endCondition:'target',targetScore:20,targetEnd:'round'}});assert.equal(result.view.game.deviceOnly,true);assert.equal(cloudCalls,0,'unsupported account rules start locally');
+ const expired={account:async()=>({scoringRulesVersion:3}),create:async()=>{throw new Error('Session expired')}};
+ result=await startGame({...base,cloud:expired});assert.equal(result.view.game.deviceOnly,true,'create failure falls back');
+ const hanging={account:async()=>new Promise(()=>{}),create:async()=>{throw new Error('Should not post')}};
+ result=await startGame({...base,cloud:hanging});assert.equal(result.view.game.deviceOnly,true,'hanging account check does not prevent starting');
+ const late={account:async()=>({scoringRulesVersion:3}),create:async id=>{cloudCalls++;return new Promise(resolve=>setTimeout(()=>resolve({game:{id}}),50))}};
+ const attempted=[];result=await startGame({...base,cloud:late,uuid:()=>{const id=randomUUID();attempted.push(id);return id}});assert.equal(result.view.game.deviceOnly,true);assert.notEqual(result.view.game.id,attempted[0],'ambiguous remote save has a separate ID from playable device game');
+ const healthy={account:async()=>({scoringRulesVersion:3}),create:async(id,name,players,winner,rules)=>({game:{id,name,players:players.map((name,i)=>({id:String(i),name})),winner,...rules,entries:[],next:'0',finished:false,version:1,updated:new Date().toISOString()},totals:{0:0,1:0},winnerIds:[]})};
+ result=await startGame({...base,cloud:healthy});assert.equal(result.deviceOnly,false,'healthy account still saves to account');
+ const before=deviceData;await assert.rejects(()=>startGame({...base,cloud:offline,players:['A','A']}),/different player names/);assert.equal(deviceData,before,'invalid setup never creates a fallback');
+ const failedLocal=new LocalGames({read:async()=>null,write:async()=>{throw new Error('Storage full')}},randomUUID);await assert.rejects(()=>startGame({...base,local:failedLocal,cloud:offline}),/Storage full/);
+ console.log('Reliable signed-in starts: offline, expired session, unsupported rules, timeout, scoring/reload, dashboard visibility, healthy cloud, invalid setup and storage errors passed.');
+}
+{
+ const {startGame}=await import(pathToFileURL(path.join(output,'game-start.js')).href);
+ const {importPendingGames,pendingImports}=await import(pathToFileURL(path.join(output,'game-import.js')).href);
+ let rawDevice=null;const local=new LocalGames({read:async()=>rawDevice,write:async data=>{rawDevice=data}},randomUUID);
+ const unavailable={account:async()=>{throw new Error('offline')},create:async()=>{throw new Error('offline')}};
+ const result=await startGame({local,cloud:unavailable,signedIn:true,name:'Backup test',players:['A','B'],winner:'high',rules:{},uuid:randomUUID});
+ let play=await local.act(result.view.game,{action:'score',points:10});let accountGame=null;
+ const cloud={list:async()=>accountGame?[{...accountGame,turnCount:accountGame.entries.length}]:[],get:async()=>({game:accountGame}),import:async game=>{accountGame={...game,deviceOnly:undefined};return {game:accountGame}}};
+ await importPendingGames(local,cloud,true,()=>{},true);assert.equal((await local.get(play.game.id)).game.deviceOnly,false,'confirmed backup switches dashboard to cloud without deleting original');assert.equal((await local.get(play.game.id)).totals[play.game.players[0].id],10);
+ await local.markDeviceOnly(play.game.id,true);await pendingImports(local,cloud);assert.equal((await local.get(play.game.id)).game.deviceOnly,false,'lost local cleanup recovers only after verifying identical account copy');
+ await local.markDeviceOnly(play.game.id,true);play=await local.act((await local.get(play.game.id)).game,{action:'score',points:7});
+ const conflictCloud={...cloud,import:async()=>{const {ApiError}=await import(pathToFileURL(path.join(output,'api.js')).href);throw new ApiError(409,'Already imported')}};
+ const pending=await pendingImports(local,conflictCloud);assert.equal(pending.length,1,'different device scores remain visible and pending');await assert.rejects(()=>importPendingGames(local,conflictCloud,true,()=>{},true),/device copy was kept/);assert.equal((await local.get(play.game.id)).game.deviceOnly,true);
+ console.log('Fallback account backup, retained originals, lost acknowledgement recovery and differing-copy protection passed.');
 }
