@@ -1,0 +1,7 @@
+"use client";
+import {type ReactNode} from "react";
+import {Dialog as DialogPrimitive} from "radix-ui";
+import {X} from "lucide-react";
+export default function SideDrawer({open,onClose,title,description,locked=false,children}:{open:boolean;onClose:()=>void;title:string;description:string;locked?:boolean;children:ReactNode}){
+ return <DialogPrimitive.Root open={open} onOpenChange={value=>{if(!value&&!locked)onClose()}}><DialogPrimitive.Portal><DialogPrimitive.Overlay className="drawer-backdrop"/><DialogPrimitive.Content className="scorekeeper-drawer" onCloseAutoFocus={event=>{const desktop=window.matchMedia('(min-width: 720px)').matches;const trigger=document.getElementById(desktop?(title==='Settings'?'header-settings-trigger':'header-account-trigger'):'header-menu-trigger');if(trigger){event.preventDefault();trigger.focus()}}} onEscapeKeyDown={event=>{if(locked)event.preventDefault()}} onInteractOutside={event=>{if(locked)event.preventDefault()}}><div className="drawer-header"><DialogPrimitive.Title className="drawer-title">{title}</DialogPrimitive.Title><button type="button" className="drawer-close" disabled={locked} aria-label={`Close ${title}`} onClick={onClose}><X size={22} aria-hidden="true"/></button></div><div className="drawer-body"><DialogPrimitive.Description className="muted">{description}</DialogPrimitive.Description>{children}</div></DialogPrimitive.Content></DialogPrimitive.Portal></DialogPrimitive.Root>
+}
