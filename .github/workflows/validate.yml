@@ -25,6 +25,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: node scripts/test-api-client.mjs
       - run: node scripts/test-local-games.mjs
+      - run: node scripts/test-player-drag.mjs
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
   mobile:
