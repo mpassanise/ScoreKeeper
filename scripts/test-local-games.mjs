@@ -92,3 +92,35 @@ assert.deepEqual(firstImport,{imported:1,existing:0,blocked:1});assert.deepEqual
 const blockedOnly=await importPendingGames(mixedLocal,mixedCloud,false,n=>pendingCount=n);assert.deepEqual(blockedOnly,{imported:0,existing:0,blocked:1});assert.equal(attempted.length,1,'unsupported games never go to an older API');
 const retrySupported=await importPendingGames(mixedLocal,mixedCloud,true,n=>pendingCount=n);assert.deepEqual(retrySupported,{imported:1,existing:0,blocked:0});assert.equal(pendingCount,0);assert.deepEqual(attempted,[compatible.id,advanced.id]);assert.equal(JSON.stringify(mixedGames),mixedOriginal);
 console.log('Compatible imports proceed, unsupported games stay local, and refreshed support enables retry without duplicates.');
+{
+// Score-limit end-of-round fairness, corrections, persistence, and cloud rollout.
+let roundRaw=null;
+const roundApi=new LocalGames({read:async()=>roundRaw,write:async value=>{roundRaw=value}},randomUUID);
+let final=await roundApi.create(randomUUID(),'Final round',['A','B','C'],'high',{endCondition:'target',targetScore:20,targetEnd:'round'});
+final=await roundApi.act(final.game,{action:'score',points:20});assert.equal(final.game.finished,false);
+await assert.rejects(()=>roundApi.act(final.game,{action:'select',playerId:final.game.players[0].id}),/completed the final round/);
+final=await roundApi.get(final.game.id);assert.equal(final.game.targetEnd,'round','saved ending survives reload');
+final=await roundApi.act(final.game,{action:'score',points:25});assert.equal(final.game.finished,false,'another threshold does not extend final round');
+final=await roundApi.act(final.game,{action:'score',points:0});assert.equal(final.game.finished,true);assert.deepEqual(final.winnerIds,[final.game.players[1].id],'remaining player can win');
+final=await roundApi.act(final.game,{action:'undo'});assert.equal(final.game.finished,false);assert.equal(final.game.next,final.game.players[2].id);
+final=await roundApi.act(final.game,{action:'edit',entryId:final.game.entries[0].id,points:5});
+final=await roundApi.act(final.game,{action:'edit',entryId:final.game.entries[1].id,points:5});
+final=await roundApi.act(final.game,{action:'score',points:0});assert.equal(final.game.finished,false,'correcting all crossings cancels ending');
+final=await roundApi.act(final.game,{action:'score',points:15});final=await roundApi.act(final.game,{action:'score',points:15});final=await roundApi.act(final.game,{action:'score',points:20});assert.equal(final.game.finished,true);assert.equal(final.winnerIds.length,3);
+let snapshot=await roundApi.create(randomUUID(),'Snapshot',['A','B'],'low',{endCondition:'target',targetScore:20,targetEnd:'round',scoreMode:'total'});
+snapshot=await roundApi.act(snapshot.game,{action:'score',points:20});snapshot=await roundApi.act(snapshot.game,{action:'score',points:10});assert.equal(snapshot.game.finished,true);assert.deepEqual(snapshot.winnerIds,[snapshot.game.players[1].id]);
+let last=await roundApi.create(randomUUID(),'Last player',['A','B'],'high',{endCondition:'target',targetScore:20,targetEnd:'round'});last=await roundApi.act(last.game,{action:'score',points:0});last=await roundApi.act(last.game,{action:'score',points:20});assert.equal(last.game.finished,true);
+await assert.rejects(()=>roundApi.create(randomUUID(),'Bad',['A','B'],'high',{endCondition:'target',targetScore:20,targetEnd:'round',playStyle:'free'}),/turn-based/);
+await assert.rejects(()=>roundApi.create(randomUUID(),'Bad',['A','B'],'high',{targetEnd:'round'}),/score limit/);
+const {ScorekeeperApi}=await import(pathToFileURL(path.join(output,'api.js')).href);
+const savedFetch=globalThis.fetch;let scoringVersion=2,roundPosts=0;
+try{
+ globalThis.fetch=async(url,options)=>{if(String(url).endsWith('/account'))return {ok:true,json:async()=>({scoringRulesVersion:scoringVersion})};roundPosts++;return {ok:true,json:async()=>final}};
+ const cloudRound=new ScorekeeperApi('https://example.com/api',async()=>'test-token');
+ await assert.rejects(()=>cloudRound.create(randomUUID(),'Round',['A','B'],'high',{endCondition:'target',targetScore:20,targetEnd:'round'}),/not available/);
+ await assert.rejects(()=>cloudRound.import(final.game),/not available/);assert.equal(roundPosts,0,'old API never receives unsupported ending');
+ scoringVersion=3;await cloudRound.create(randomUUID(),'Round',['A','B'],'high',{endCondition:'target',targetScore:20,targetEnd:'round'});assert.equal(roundPosts,1);
+}finally{globalThis.fetch=savedFetch}
+console.log('Target round endings: remaining turns, final winners, ties, corrections, undo, reload and API rollout passed.');
+
+}
