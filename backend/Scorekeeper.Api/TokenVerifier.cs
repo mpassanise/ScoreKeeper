@@ -1,4 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using HttpRequestData = Microsoft.Azure.Functions.Worker.Http.HttpRequestData;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
@@ -8,8 +10,10 @@ public sealed class TokenVerifier
 {
  readonly ConfigurationManager<OpenIdConnectConfiguration> manager;
  readonly string tenant, audience, scope;
- public TokenVerifier()
+ readonly ILogger<TokenVerifier> logger;
+ public TokenVerifier(ILogger<TokenVerifier> logger)
  {
+  this.logger=logger;
   var authority=Required("AuthAuthority").TrimEnd('/');
   if(!Uri.TryCreate(authority,UriKind.Absolute,out var uri)||uri.Scheme!="https"||!uri.Host.EndsWith(".ciamlogin.com",StringComparison.OrdinalIgnoreCase))throw new InvalidOperationException("Configure a HTTPS Entra External ID authority.");
   tenant=Required("AuthTenantId");audience=Required("AuthAudience");scope=Required("AuthScope");
@@ -23,15 +27,21 @@ public sealed class TokenVerifier
   if(header is null||!header.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase))throw new UnauthorizedAccessException();
   try
   {
-   var config=await manager.GetConfigurationAsync(CancellationToken.None);
+   var elapsed=Stopwatch.StartNew();
+   logger.LogInformation("Scorekeeper auth metadata retrieval started");
+   OpenIdConnectConfiguration config;
+   try{config=await manager.GetConfigurationAsync(CancellationToken.None);}
+   catch(Exception e){logger.LogError(e,"Scorekeeper auth metadata retrieval failed after {ElapsedMs} ms",elapsed.ElapsedMilliseconds);throw;}
+   logger.LogInformation("Scorekeeper auth metadata ready after {ElapsedMs} ms",elapsed.ElapsedMilliseconds);
    var handler=new JwtSecurityTokenHandler{MapInboundClaims=false};
    var result=await handler.ValidateTokenAsync(header[7..],new TokenValidationParameters{ValidateIssuer=true,ValidIssuer=config.Issuer,ValidateAudience=true,ValidAudience=audience,ValidateLifetime=true,RequireExpirationTime=true,RequireSignedTokens=true,ValidateIssuerSigningKey=true,IssuerSigningKeys=config.SigningKeys,ValidAlgorithms=[SecurityAlgorithms.RsaSha256],ClockSkew=TimeSpan.FromMinutes(1)});
-   if(!result.IsValid){if(result.Exception is SecurityTokenSignatureKeyNotFoundException)manager.RequestRefresh();throw new UnauthorizedAccessException();}
+   if(!result.IsValid){logger.LogWarning("Scorekeeper token validation rejected; FailureType {FailureType}",result.Exception?.GetType().Name??"unknown");if(result.Exception is SecurityTokenSignatureKeyNotFoundException)manager.RequestRefresh();throw new UnauthorizedAccessException();}
    var claims=result.ClaimsIdentity;
    var oid=claims.FindFirst("oid")?.Value;
    // Deletion markers expire after 30 days; reject access tokens with lifetimes over 24 hours.
    if(!long.TryParse(claims.FindFirst("iat")?.Value,out var issued)||!long.TryParse(claims.FindFirst("exp")?.Value,out var expires)||expires<=issued||expires-issued>86400||issued>DateTimeOffset.UtcNow.ToUnixTimeSeconds()+60)throw new UnauthorizedAccessException();
    if(claims.FindFirst("tid")?.Value!=tenant || !Guid.TryParse(oid,out _) || !(claims.FindFirst("scp")?.Value.Split(' ')??[]).Contains(scope))throw new UnauthorizedAccessException();
+   logger.LogInformation("Scorekeeper token validation passed after {ElapsedMs} ms",elapsed.ElapsedMilliseconds);
    return tenant+":"+oid;
   }
   catch(SecurityTokenException){throw new UnauthorizedAccessException();}
