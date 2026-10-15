@@ -12,6 +12,7 @@
 .app :global(label),.app :global(.game-setup legend){font-size:14px;line-height:1.4;font-weight:700;margin-bottom:8px}
 .app :global(.title){margin:0 0 20px;align-items:center}
 .app :global(.title h1){margin:8px 0}
+.app :global(.game-top-actions){display:flex;align-items:center;flex-wrap:wrap;gap:10px;flex-shrink:0}
 .app :global(.eyebrow){font-size:12px;line-height:1.5;letter-spacing:.08em}
 .app :global(.game-time){font-size:13px;margin:8px 0 24px;line-height:1.6}
 .app :global(.panel){padding:24px;margin-top:24px;box-shadow:none}
@@ -65,6 +66,9 @@
  .app :global(.player-layout-actions){width:100%}
  .app :global(.player-layout-actions .outline){flex:1;padding-left:10px;padding-right:10px}
  .app :global(.title){gap:12px}
+ .app :global(.title){flex-wrap:wrap}
+ .app :global(.game-top-actions){width:100%}
+ .app :global(.game-top-actions button){flex:1}
  .app :global(.title>.outline){flex-shrink:0}
  .app :global(.entry){grid-template-columns:minmax(0,1fr) auto}
  .app :global(.entry input){width:100%;max-width:none}
