@@ -1,0 +1,15 @@
+export const frequentPlayersKey='scorekeeper-frequent-players-v1';
+export const playerKey=(name:string)=>name.trim().toLocaleLowerCase();
+export function cleanPlayerName(name:string){const value=name.trim();if(!value||value.length>30)throw new Error('Use a player name of 1–30 characters.');return value}
+export function parseFrequentPlayers(raw:string|null):string[]{if(raw===null)return [];const value:unknown=JSON.parse(raw);if(!Array.isArray(value)||value.length>50||value.some(name=>typeof name!=='string'))throw new Error('Saved players could not be read.');const names=value.map(cleanPlayerName);if(new Set(names.map(playerKey)).size!==names.length)throw new Error('Saved players contain duplicate names.');return names}
+export function savePlayer(names:readonly string[],name:string,original?:string):string[]{const cleaned=cleanPlayerName(name);if(names.some(n=>playerKey(n)===playerKey(cleaned)&&n!==original))throw new Error('That player is already in your frequent players.');if(original!==undefined){if(!names.includes(original))throw new Error('This player has changed. Try again.');return names.map(n=>n===original?cleaned:n)}if(names.length>=50)throw new Error('You can save up to 50 frequent players.');return [...names,cleaned]}
+export function pickPlayer(players:readonly string[],name:string):string[]{const cleaned=cleanPlayerName(name);if(players.some(n=>playerKey(n)===playerKey(cleaned)))return [...players];const empty=players.findIndex(n=>!n.trim());if(empty>=0)return players.map((n,i)=>i===empty?cleaned:n);if(players.length>=20)throw new Error('A game can have up to 20 players.');return [...players,cleaned]}
+type Snapshot={names:readonly string[];ready:boolean;saving:boolean;error:string};
+type Storage={read:()=>Promise<string|null>;write:(value:string)=>Promise<void>};
+export function createFrequentPlayersStore(storage:Storage){
+ let state:Snapshot={names:[],ready:false,saving:false,error:''},loading:Promise<void>|null=null;
+ const listeners=new Set<()=>void>();const publish=(next:Snapshot)=>{state=next;listeners.forEach(listener=>listener())};
+ const load=()=>{if(loading)return loading;loading=(async()=>{try{const names=parseFrequentPlayers(await storage.read());publish({...state,names,ready:true,error:''})}catch{publish({...state,ready:false,error:'Saved players could not be loaded. Retry to keep your existing list safe.'})}finally{loading=null}})();return loading};
+ async function update(change:(names:readonly string[])=>string[]){if(!state.ready||state.saving)return false;publish({...state,saving:true,error:''});try{const names=change(state.names);await storage.write(JSON.stringify(names));publish({names,ready:true,saving:false,error:''});return true}catch(error){publish({...state,saving:false,error:error instanceof Error?error.message:'Could not save players. Try again.'});return false}}
+ return {getSnapshot:()=>state,subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>{listeners.delete(listener)}},load,save:(name:string,original?:string)=>update(names=>savePlayer(names,name,original)),remove:(name:string)=>update(names=>names.filter(n=>n!==name))};
+}
