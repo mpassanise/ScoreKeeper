@@ -1,3 +1,4 @@
+import type {PlayerChange,PlayerProfile} from './frequent-player-sync';
 import {validateTargetEnding} from './target-ending';
 import {validateTargetScore,validateScoreAction,validateScoreLimit} from './score-limit';
 export type Player={id:string;name:string};
@@ -7,7 +8,7 @@ export type Game=Rules & {id:string;name:string;players:Player[];winner:"high"|"
 export type GameView={game:Game;totals:Record<string,number>;winnerIds:string[]};
 export type GameSummary=Pick<Game,"id"|"name"|"players"|"winner"|"finished"|"version"|"updated"|"startedAt"|"endedAt"|"deviceOnly"> & {turnCount:number};
 export type Action={action:"score"|"edit"|"select"|"undo"|"finish"|"resume";points?:number;playerId?:string;entryId?:string};
-export type AccountStatus={scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
+export type AccountStatus={profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message)}}
 export class ScorekeeperApi{
@@ -47,6 +48,7 @@ export class ScorekeeperApi{
  }
 
  private async requireRoundEnding(rules:Rules){if(rules.targetEnd==='round'&&((await this.account()).scoringRulesVersion||0)<3)throw new Error('End-of-round scoring is not available for your account yet. Sync Games after the API update, or sign out to play locally.')}
+ syncFrequentPlayers(profileId:string,changes:PlayerChange[]){return this.request<PlayerProfile>("/players/sync",{profileId,changes})}
  account(){return this.request<AccountStatus>("/account")}
  deleteAccount(confirmation:string){return this.request<AccountDeletion>("/account/delete",{confirmation})}
  list(){return this.request<GameSummary[]>("/games")}
