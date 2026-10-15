@@ -2,7 +2,7 @@ import {useThemeStyles} from './Theme';
 import {useRef,useState} from 'react';
 import DragHandle,{DraggablePlayer} from './DragHandle';
 import {LayoutAnimation,Pressable,StyleSheet,Text,TextInput,View} from 'react-native';
-import {changeTargetEnd,changeEnding,changePlayStyle,scrabbleSummary,setupHint,type GameSetupProps} from '../shared/game-setup';
+import {changeTargetEnd,changeEnding,changePlayStyle,scrabbleSummary,phase10Summary,setupHint,type GameSetupProps} from '../shared/game-setup';
 export default function GameSetup({presetId,onPresetChange,name,onNameChange,players,onPlayersChange,settings,onSettingsChange,onSubmit,busy,onDraggingChange}:GameSetupProps & {onDraggingChange?:(active:boolean)=>void}){
  const s=useThemeStyles(baseStyles);
  const [dragTarget,setDragTarget]=useState<number|null>(null);
@@ -11,14 +11,14 @@ export default function GameSetup({presetId,onPresetChange,name,onNameChange,pla
  const hint=setupHint(name,players,settings,presetId);
  function choices<T extends string>(label:string,value:T,options:{value:T;label:string}[],onChange:(value:T)=>void){return <View style={s.field}><Text style={s.label}>{label}</Text><View style={s.options}>{options.map(option=><Pressable key={option.value} accessibilityRole="button" accessibilityState={{selected:value===option.value}} onPress={()=>onChange(option.value)} style={[s.option,value===option.value&&s.selected]}><Text style={[s.optionText,value===option.value&&s.selectedText]}>{option.label}</Text></Pressable>)}</View></View>}
  return <View style={s.panel}>
-  <View><Text style={s.label}>Game preset</Text><View style={s.options}>{([{id:'custom',title:'Custom',detail:'Choose your rules'},{id:'scrabble',title:'Scrabble',detail:'Classic scoring'}] as const).map(p=><Pressable key={p.id} accessibilityRole="button" accessibilityState={{selected:presetId===p.id}} onPress={()=>onPresetChange(p.id)} style={[s.preset,presetId===p.id&&s.selected]}><Text style={s.presetTitle}>{p.title}</Text><Text style={s.help}>{p.detail}</Text></Pressable>)}</View></View>
+  <View><Text style={s.label}>Game preset</Text><View style={s.options}>{([{id:'custom',title:'Custom',detail:'Choose your rules'},{id:'scrabble',title:'Scrabble',detail:'Classic scoring'},{id:'phase10',title:'Phase 10',detail:'Lowest score wins'}] as const).map(p=><Pressable key={p.id} accessibilityRole="button" accessibilityState={{selected:presetId===p.id}} onPress={()=>onPresetChange(p.id)} style={[s.preset,presetId===p.id&&s.selected]}><Text style={s.presetTitle}>{p.title}</Text><Text style={s.help}>{p.detail}</Text></Pressable>)}</View></View>
   <View style={s.section}><Text style={s.label}>Game name</Text><TextInput placeholderTextColor={s.help.color} accessibilityLabel="Game name" style={s.input} placeholder="e.g. Friday game night" maxLength={60} value={name} onChangeText={onNameChange} returnKeyType="next"/></View>
-  <View style={s.section}><Text style={s.label}>Players</Text><Text style={s.help}>{presetId==='scrabble'||settings.playStyle==='turns'?'Enter names in turn order. The first player goes first.':'Add everyone playing. You can score for any player.'}</Text>
+  <View style={s.section}><Text style={s.label}>Players</Text><Text style={s.help}>{presetId!=='custom'||settings.playStyle==='turns'?'Enter names in turn order. The first player goes first.':'Add everyone playing. You can score for any player.'}</Text>
    {players.map((player,index)=><DraggablePlayer key={index} index={index} items={playerRows} style={[s.playerRow,dragTarget===index&&s.dropTarget]} onDraggingChange={onDraggingChange} onTargetChange={setDragTarget}><Text style={s.number}>{index+1}</Text><TextInput placeholderTextColor={s.help.color} accessibilityLabel={`Player ${index+1} name`} placeholder={`Player ${index+1}`} style={[s.input,s.playerInput]} maxLength={30} value={player} onChangeText={value=>onPlayersChange(players.map((p,i)=>i===index?value:p))}/><DragHandle index={index} label={player.trim()||`player ${index+1}`} items={playerRows} onMove={movePlayer} disabled={busy}/>{players.length>2&&<Pressable accessibilityRole="button" accessibilityLabel={`Remove player ${index+1}`} style={s.remove} onPress={()=>onPlayersChange(players.filter((_,i)=>i!==index))}><Text style={s.removeText}>×</Text></Pressable>}</DraggablePlayer>)}
    <Pressable accessibilityRole="button" disabled={players.length>=20} style={s.add} onPress={()=>onPlayersChange([...players,''])}><Text style={s.link}>+ Add player</Text></Pressable>
   </View>
-  <View style={s.section}><Text style={s.heading}>{presetId==='scrabble'?'How scoring works':'Scoring rules'}</Text>
-   {presetId==='scrabble'?<View style={s.summary}><Text style={s.summaryText}>{scrabbleSummary}</Text></View>:<View style={s.settings}>
+  <View style={s.section}><Text style={s.heading}>{presetId!=='custom'?'How scoring works':'Scoring rules'}</Text>
+   {presetId!=='custom'?<View style={s.summary}><Text style={s.summaryText}>{presetId==='phase10'?phase10Summary:scrabbleSummary}</Text></View>:<View style={s.settings}>
     {choices('Play style',settings.playStyle,[{value:'turns',label:'Turn-based'},{value:'free',label:'Free-for-all'}],value=>onSettingsChange(changePlayStyle(settings,value)))}
     <Text style={s.help}>{settings.playStyle==='turns'?'Advance to the next player automatically.':'Keep the selected player after each score.'}</Text>
     {choices('Score entry',settings.scoreMode,[{value:'add',label:'Add points'},{value:'total',label:'Current total'}],value=>onSettingsChange({...settings,scoreMode:value}))}
