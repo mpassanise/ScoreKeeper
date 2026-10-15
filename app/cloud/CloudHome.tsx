@@ -44,7 +44,7 @@ export default function CloudHome(){
  async function enterGuest(){await run(async()=>{setGames(await localApi.list());setView(null);setGuest(true)})}
 
  useEffect(()=>{if(loaded&&guest&&!account){if(view)localStorage.setItem("scorekeeper-guest-active",view.game.id);else localStorage.removeItem("scorekeeper-guest-active")}},[view,loaded,guest,account]);
- function choosePreset(id:PresetId){setPresetId(id);if(id==="scrabble")setName("Scrabble");setError("")}
+ function choosePreset(id:PresetId){setPresetId(id);if(id==="scrabble")setName("Scrabble");else if(id==="phase10")setName("Phase 10");setError("")}
  const game=view?.game;
  async function noPoints(){if(!game||game.finished||game.playStyle==='free')return;await action({action:'score',points:game.scoreMode==='total'?view!.totals[game.next]:0})}
  async function action(a:Action){if(!game)return;await run(async()=>{setView(await api.act(game,a));if(a.action==="score")setPoints("");if(a.action==="edit")setEdit(null)})}

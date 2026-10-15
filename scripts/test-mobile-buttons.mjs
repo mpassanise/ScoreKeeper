@@ -15,5 +15,5 @@ const {scoreKeyInput}=await import(pathToFileURL(path.join(output,'score-keypad.
 let draft='';for(const key of ['1','2','3'])draft=scoreKeyInput(draft,key);assert.equal(draft,'123');
 draft=scoreKeyInput(draft,'sign');assert.equal(draft,'-123');draft=scoreKeyInput(draft,'backspace');assert.equal(draft,'-12');draft=scoreKeyInput(draft,'sign');assert.equal(draft,'12');
 assert.equal(scoreKeyInput('','sign'),'-');assert.equal(scoreKeyInput('-','0'),'-0');assert.equal(scoreKeyInput('000','5'),'5');assert.equal(scoreKeyInput('-00','5'),'-5');assert.equal(scoreKeyInput('','backspace'),'');
-assert.equal(scoreKeyInput('100000','0'),'1000000');assert.equal(scoreKeyInput('1000000','1'),'1000000');assert.equal(scoreKeyInput('999999','9'),'999999');assert.equal(scoreKeyInput('12','.'),'12');assert.equal(scoreKeyInput('12','x'),'12');
+assert.equal(scoreKeyInput('10000','0'),'100000');assert.equal(scoreKeyInput('100000','1'),'100000');assert.equal(scoreKeyInput('99999','9'),'99999');assert.equal(scoreKeyInput('-10000','0'),'-100000');assert.equal(scoreKeyInput('12','.'),'12');assert.equal(scoreKeyInput('12','x'),'12');
 console.log('Inline score keypad: digits, sign, backspace, leading zeros, numeric-only input and score bounds passed.');

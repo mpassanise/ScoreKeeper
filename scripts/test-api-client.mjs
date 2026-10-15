@@ -31,8 +31,8 @@ assert.equal(calls.length,5,'account deletion failures must not be retried autom
 console.log('API client request, conflict, deletion and HTTPS checks passed.');
 
 const previousCalls=calls.length;
-assert.throws(()=>api.act(game,{action:'score',points:10000}),/9,999/);
-assert.throws(()=>api.create('new','Too high',['A','B'],'high',{endCondition:'target',targetScore:10000}),/9,999/);
+assert.throws(()=>api.act(game,{action:'score',points:100001}),/100,000/);
+assert.throws(()=>api.create('new','Too high',['A','B'],'high',{endCondition:'target',targetScore:100001}),/100,000/);
 assert.equal(calls.length,previousCalls,'invalid scores and targets are rejected before any server request');
 console.log('Cloud client rejects over-limit totals and targets before sending.');
 
