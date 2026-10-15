@@ -68,14 +68,14 @@ store.Fail=false;result=await service.Delete(owner,"DELETE");Check(result.Status
 var calls=directory.Calls;result=await service.Delete(owner,"DELETE");Check(result.Status=="completed"&&directory.Calls==calls,"completed retry is idempotent");
 foreach(var mode in new[]{"add","total"}){
  var cap=Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high",playStyle:"free",scoreMode:mode);
- var player=cap.Players[0].Id;cap=Scoring.Apply(cap,new(cap.Version,"score",9999,PlayerId:player));
- Check(Scoring.Total(cap,player)==9999,"exact score cap accepted");
- Throws<ArgumentException>(()=>Scoring.Apply(cap,new(cap.Version,"score",mode=="add"?1:10000,PlayerId:player)),"score overflow rejected");
- Throws<ArgumentException>(()=>Scoring.Apply(cap,new(cap.Version,"edit",10000,EntryId:cap.Entries[0].Id)),"edit overflow rejected");
- cap=Scoring.Apply(cap,new(cap.Version,"score",-5,PlayerId:player));Check(Scoring.Total(cap,player)==(mode=="add"?9994:-5),"negative score adjustments accepted");
+ var player=cap.Players[0].Id;cap=Scoring.Apply(cap,new(cap.Version,"score",100000,PlayerId:player));
+ Check(Scoring.Total(cap,player)==100000,"exact score cap accepted");
+ Throws<ArgumentException>(()=>Scoring.Apply(cap,new(cap.Version,"score",mode=="add"?1:100001,PlayerId:player)),"score overflow rejected");
+ Throws<ArgumentException>(()=>Scoring.Apply(cap,new(cap.Version,"edit",100001,EntryId:cap.Entries[0].Id)),"edit overflow rejected");
+ cap=Scoring.Apply(cap,new(cap.Version,"score",-5,PlayerId:player));Check(Scoring.Total(cap,player)==(mode=="add"?99995:-5),"negative score adjustments accepted");
 }
-Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:10000),"target overflow rejected");
-Check(Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:9999).TargetScore==9999,"exact target cap accepted");
+Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:100001),"target overflow rejected");
+Check(Scoring.Create(Guid.NewGuid(),"Cap",["A","B"],"high","target",targetScore:100000).TargetScore==100000,"exact target cap accepted");
 // Score-limit end-of-round grants each remaining player one turn.
 var final=Scoring.Create(Guid.NewGuid(),"Final round",["A","B","C"],"high","target",targetScore:20,targetEnd:"round");
 final=Scoring.Apply(final,new(final.Version,"score",20));Check(!final.Finished&&Scoring.TargetEndRound(final)==1,"threshold starts final round");
