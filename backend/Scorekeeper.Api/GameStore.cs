@@ -40,7 +40,7 @@ public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
  public async Task CompleteDeletion(string owner)
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);
-  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
+  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="DELETE FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner; DELETE FROM dbo.FrequentPlayers WHERE OwnerId=@owner; DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
  }
  public async Task<Game?> Get(string owner,Guid id)
  {
@@ -62,6 +62,21 @@ public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
   await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="UPDATE dbo.Games SET State=@state,Version=@version,Updated=@updated WHERE OwnerId=@owner AND GameId=@id AND Version=@expected";Parameters(q,owner,g);q.Parameters.AddWithValue("@expected",expected);var changed=await q.ExecuteNonQueryAsync()==1;await tx.CommitAsync();return changed;
+ }
+ public async Task<string[]> SyncPlayers(string owner,FrequentPlayerChange[] changes)
+ {
+  if(changes is null||changes.Length>100||changes.Any(op=>op is null))throw new ArgumentException("Send up to 100 player changes at a time.");
+  await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
+  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="SELECT State FROM dbo.FrequentPlayers WHERE OwnerId=@owner";q.Parameters.AddWithValue("@owner",owner);
+  var state=await q.ExecuteScalarAsync() as string;var names=state is null?Array.Empty<string>():JsonSerializer.Deserialize<string[]>(state,Json)!;
+  foreach(var op in changes){
+   await using var check=c.CreateCommand();check.Transaction=tx;check.CommandText="SELECT 1 FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner AND OperationId=@id";check.Parameters.AddWithValue("@owner",owner);check.Parameters.AddWithValue("@id",op.Id);
+   if(await check.ExecuteScalarAsync() is not null)continue;
+   names=FrequentPlayers.Apply(names,op);
+   check.CommandText="INSERT dbo.FrequentPlayerOperations(OwnerId,OperationId,AppliedAt) VALUES(@owner,@id,SYSDATETIMEOFFSET())";await check.ExecuteNonQueryAsync();
+  }
+  if(names.Length>500)throw new ArgumentException("Too many saved players. Remove unused names, then sync again.");
+  q.CommandText="UPDATE dbo.FrequentPlayers SET State=@state,Updated=SYSDATETIMEOFFSET() WHERE OwnerId=@owner; IF @@ROWCOUNT=0 INSERT dbo.FrequentPlayers(OwnerId,State,Updated) VALUES(@owner,@state,SYSDATETIMEOFFSET())";q.Parameters.AddWithValue("@state",JsonSerializer.Serialize(names,Json));await q.ExecuteNonQueryAsync();await tx.CommitAsync();return names;
  }
  async Task<T> Measure<T>(string operation,Func<Task<T>> work){
   var elapsed=Stopwatch.StartNew();
