@@ -1,0 +1,14 @@
+.guide{margin:16px 0 20px;border:1px solid var(--border,#dce5e7);border-radius:12px;background:var(--accent,#edf8f5);color:var(--foreground,#17252a);overflow:hidden}
+.guide summary{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:48px;padding:10px 16px;cursor:pointer;font-size:15px;font-weight:700;list-style:none;color:var(--secondary-foreground,#226b73)}
+.guide summary::-webkit-details-marker{display:none}
+.guide summary:focus-visible{outline:3px solid var(--ring,#287a83);outline-offset:-3px;border-radius:12px}
+.icon{display:grid;place-items:center;min-width:28px;font-size:26px;line-height:28px;font-weight:400}
+.icon::before{content:'+'}
+.guide[open] .icon::before{content:'−'}
+.body{padding:0 16px 12px}
+.body p{margin:0 0 8px;font-size:13px;line-height:1.5;color:var(--muted-foreground,#62777d)}
+.body dl{margin:0}
+.body dl>div{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:10px 0;border-top:1px solid var(--border,#dce5e7)}
+.body dt{font-size:15px}
+.body dd{margin:0;font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.body dd span{font-size:13px;font-weight:400}
