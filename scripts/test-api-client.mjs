@@ -83,3 +83,9 @@ await assert.rejects(api.get('private-game-id'),error=>{
  return true;
 });
 console.log('Support references, endpoint/status/stage/SQL diagnostics and ID/token omission passed.');
+
+// Player preferences use a profile assertion, never a client-supplied owner route.
+const playerChanges=[{id:'00000000-0000-0000-0000-000000000001',kind:'add',name:'Mike'}];
+globalThis.fetch=async(url,options)=>{assert.ok(url.endsWith('/players/sync'));assert.equal(options.method,'POST');assert.deepEqual(JSON.parse(options.body),{profileId:'profile-a',changes:playerChanges});return {ok:true,json:async()=>({names:['Mike']})}};
+assert.deepEqual(await api.syncFrequentPlayers('profile-a',playerChanges),{names:['Mike']});
+console.log('Frequent-player sync request contract passed.');
