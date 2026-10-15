@@ -4,7 +4,7 @@ export type PresetId="custom"|"scrabble"|"phase10";
 export type SetupSettings={playStyle:"turns"|"free";scoreMode:"add"|"total";winner:"high"|"low";endCondition:"manual"|"rounds"|"target";limit:string;targetEnd:"immediate"|"round"};
 export const defaultSettings:SetupSettings={playStyle:"turns",scoreMode:"add",winner:"high",endCondition:"manual",limit:"10",targetEnd:"immediate"};
 export const scrabbleSummary="Players take turns in the order listed. Add each turn’s points to the player’s total. Finish the game manually; the highest total wins. Enter any endgame tile adjustments yourself.";
-export const phase10Summary="Players take turns in the order listed. Add each player’s points from cards left in hand after each hand. Finish the game manually; the lowest total wins under this preset.";
+export const phase10Summary="Score players in any order. Add each player’s points from cards left in hand after each hand. Finish the game manually; the lowest total wins under this preset.";
 export function setupRules(presetId:PresetId,settings:SetupSettings):{winner:"high"|"low";rules:Rules}{
  if(presetId!=="custom"){const preset=presets.find(p=>p.id===presetId)!;return {winner:preset.winner,rules:presetRules(preset)}}
  return {winner:settings.winner,rules:{presetId:"custom",presetVersion:1,playStyle:settings.playStyle,scoreMode:settings.scoreMode,endCondition:settings.endCondition,...(settings.endCondition==="rounds"?{roundLimit:Number(settings.limit)}:settings.endCondition==="target"?{targetScore:Number(settings.limit),targetEnd:settings.targetEnd}:{})}};
