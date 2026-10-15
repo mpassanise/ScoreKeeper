@@ -26,14 +26,14 @@ public static class Scoring
   if(g.EndCondition=="rounds" && g.PlayStyle=="free")throw new ArgumentException("Fixed rounds require turn-based play.");
   if(g.EndCondition is not ("manual" or "rounds" or "target"))throw new ArgumentException("Choose a valid ending rule.");
   if(g.EndCondition=="rounds" && (g.RoundLimit is null or <1 || (long)g.RoundLimit*g.Players.Length>10000))throw new ArgumentException("Use a positive round limit within 10000 turns.");
-  if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >9999))throw new ArgumentException("Target score must be a whole number from 1 to 9,999.");
+  if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >100000))throw new ArgumentException("Target score must be a whole number from 1 to 100,000.");
   if(g.TargetEnd is not ("immediate" or "round"))throw new ArgumentException("Choose a valid score-limit ending.");
   if(g.TargetEnd=="round" && (g.EndCondition!="target" || g.PlayStyle!="turns"))throw new ArgumentException("End of round requires a score limit and turn-based play.");
   if(g.FinishReason is not (null or "manual" or "rounds" or "target"))throw new ArgumentException("Invalid finish reason.");
   if(g.EndedAt is not null && !g.Finished)throw new ArgumentException("An active game cannot have an end time.");
   var ids=g.Players.Select(p=>p.Id).ToHashSet();
   if(!ids.Contains(g.Next)||g.Entries.Length>10000||g.Entries.Any(e=>e is null || e.Id==Guid.Empty||!ids.Contains(e.PlayerId)||Math.Abs((long)e.Points)>1000000)||g.Entries.Select(e=>e.Id).Distinct().Count()!=g.Entries.Length)throw new ArgumentException("Invalid score history or next player.");
-  if(g.Players.Any(p=>Total(g,p.Id)>9999))throw new ArgumentException("Player totals cannot exceed 9,999. Enter a smaller score.");
+  if(g.Players.Any(p=>Total(g,p.Id)>100000))throw new ArgumentException("Player totals cannot exceed 100,000. Enter a smaller score.");
  }
  public static Game Apply(Game g, Command c)
  {
@@ -43,7 +43,7 @@ public static class Scoring
   {
    case "score":
     if(g.Finished)throw new ArgumentException("Resume the game before adding a turn.");
-    if(c.Points is null || Math.Abs((long)c.Points.Value)>1000000)throw new ArgumentException("Points must be a whole number between -1000000 and 1000000.");
+    if(c.Points is null || Math.Abs((long)c.Points.Value)>100000)throw new ArgumentException("Points must be a whole number between -100,000 and 100,000.");
     if(g.Entries.Length>=10000)throw new ArgumentException("Game has reached the turn limit.");
     var scoringPlayer=g.PlayStyle=="free"?c.PlayerId:g.Next;
     if(RemainingTargetPlayers(g) is Player[] remaining && !remaining.Any(p=>p.Id==scoringPlayer))throw new ArgumentException("This player has completed the final round. Score a remaining player.");
@@ -56,7 +56,7 @@ public static class Scoring
     if(g.Finished || !g.Players.Any(p=>p is null || p.Id==c.PlayerId))throw new ArgumentException("Select a player in an active game.");
     changed=g with{Next=c.PlayerId!.Value};break;
    case "edit":
-    if(c.Points is null||Math.Abs((long)c.Points.Value)>1000000||!g.Entries.Any(e=>e is null || e.Id==c.EntryId))throw new ArgumentException("Choose an existing turn and valid points.");
+    if(c.Points is null||Math.Abs((long)c.Points.Value)>100000||!g.Entries.Any(e=>e is null || e.Id==c.EntryId))throw new ArgumentException("Choose an existing turn and valid points.");
     changed=g with{Entries=g.Entries.Select(e=>e.Id==c.EntryId?e with{Points=c.Points.Value}:e).ToArray()};break;
    case "undo":
     if(g.Entries.Length==0)throw new ArgumentException("There is no active turn to undo.");
