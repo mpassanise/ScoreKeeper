@@ -94,6 +94,13 @@ Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"hig
 Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high",targetEnd:"round"),"round modifier requires target ending");
 Throws<ArgumentException>(()=>Scoring.Create(Guid.NewGuid(),"Bad",["A","B"],"high",targetEnd:"unknown"),"unknown target ending rejected");
 Check(legacy?.TargetEnd=="immediate","legacy JSON keeps immediate target ending");
+var roster=FrequentPlayers.Apply([],new(Guid.NewGuid(),"add"," Mike "));Check(roster.SequenceEqual(["Mike"]),"frequent names trimmed");
+roster=FrequentPlayers.Apply(roster,new(Guid.NewGuid(),"add","MIKE"));Check(roster.Length==1,"frequent duplicates merged");
+roster=FrequentPlayers.Apply(roster,new(Guid.NewGuid(),"rename","Michael","mike"));Check(roster.SequenceEqual(["Michael"]),"frequent rename");
+roster=FrequentPlayers.Apply(roster,new(Guid.NewGuid(),"remove","MICHAEL"));Check(roster.Length==0,"frequent removal");
+Throws<ArgumentException>(()=>FrequentPlayers.Apply([],new(Guid.Empty,"add","Mike")),"operation ID required");
+Throws<ArgumentException>(()=>FrequentPlayers.Apply([],new(Guid.NewGuid(),"rename","Mike")),"rename source required");
+Throws<ArgumentException>(()=>FrequentPlayers.Apply([],new(Guid.NewGuid(),"add",new string('x',31))),"frequent name limit");
 Console.WriteLine($"{checks} scoring and deletion checks passed.");
 sealed class FakeDeletionStore:IAccountDeletionStore
 {
