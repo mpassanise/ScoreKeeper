@@ -17,3 +17,5 @@ END;
 -- GRANT SELECT, INSERT, UPDATE ON dbo.Games TO [scorekeeper-api];
 
 -- For account deletion, also run migrations/002_account_deletion.sql before the updated API.
+
+-- For synced frequent players, run migrations/003_frequent_players.sql before deploying the API.
