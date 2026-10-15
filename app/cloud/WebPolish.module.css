@@ -83,3 +83,17 @@
 .app :global(.entry){display:flex;flex-wrap:wrap}
 .app :global(.entry .no-points-action){min-height:52px;white-space:nowrap}
 @media(max-width:600px){.app :global(.entry input){flex:1 0 100%;max-width:none}.app :global(.entry button){flex:1}}
+
+/* One scoring editor inside the selected player card. */
+.app :global(.scoreboard){align-items:start;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}
+.app :global(.inline-player){overflow:hidden;box-shadow:none}
+.app :global(.inline-player.active-player){border-color:var(--ring);background:var(--accent)}
+.app :global(.inline-player>.score){width:100%;border:0;border-radius:0;background:transparent;min-height:160px}
+.app :global(.inline-player>.score.current){border:0;padding:20px;background:transparent}
+.app :global(.inline-score-form){padding:0 20px 20px;border-top:1px solid var(--border);margin:0}
+.app :global(.inline-score-form>label){margin-top:16px}
+.app :global(.inline-score-actions){gap:8px}
+.app :global(.inline-score-actions input){flex:1 0 100%;width:100%;max-width:none}
+.app :global(.inline-score-actions button){flex:1;min-width:0;min-height:44px;padding:10px 12px}
+.app :global(.scoreboard-footer){display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:13px}
+@media(max-width:600px){.app :global(.scoreboard){grid-template-columns:1fr}.app :global(.inline-player>.score){min-height:132px}.app :global(.inline-score-form){padding:0 16px 16px}.app :global(.inline-player>.score.current){padding:16px}}
