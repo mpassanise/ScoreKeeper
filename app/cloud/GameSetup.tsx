@@ -1,18 +1,19 @@
-import {changeTargetEnd,changeEnding,changePlayStyle,scrabbleSummary,setupHint,type GameSetupProps} from "../../shared/game-setup";
+import {changeTargetEnd,changeEnding,changePlayStyle,scrabbleSummary,phase10Summary,setupHint,type GameSetupProps} from "../../shared/game-setup";
 export default function GameSetup({presetId,onPresetChange,name,onNameChange,players,onPlayersChange,settings,onSettingsChange,onSubmit,busy}:GameSetupProps){
  const hint=setupHint(name,players,settings,presetId);
  return <form className="card form game-setup" onSubmit={event=>{event.preventDefault();if(!busy&&!hint)onSubmit()}}>
   <fieldset className="preset-field"><legend>Game preset</legend><div className="preset-options">
    <button type="button" aria-pressed={presetId==="custom"} className={presetId==="custom"?"preset-option selected":"preset-option"} onClick={()=>onPresetChange("custom")}><strong>Custom</strong><span>Choose your scoring rules</span></button>
    <button type="button" aria-pressed={presetId==="scrabble"} className={presetId==="scrabble"?"preset-option selected":"preset-option"} onClick={()=>onPresetChange("scrabble")}><strong>Scrabble</strong><span>Classic turn-based scoring</span></button>
+   <button type="button" aria-pressed={presetId==="phase10"} className={presetId==="phase10"?"preset-option selected":"preset-option"} onClick={()=>onPresetChange("phase10")}><strong>Phase 10</strong><span>Lowest score wins</span></button>
   </div></fieldset>
   <div className="setup-section"><label htmlFor="new-game-name">Game name</label><input id="new-game-name" autoComplete="off" placeholder="e.g. Friday game night" maxLength={60} value={name} onChange={e=>onNameChange(e.target.value)} required/></div>
-  <fieldset className="setup-section player-field"><legend>Players</legend><p className="field-help">{presetId==="scrabble"||settings.playStyle==="turns"?"Enter names in turn order. The first player goes first.":"Add everyone playing. You can score for any player."}</p>
+  <fieldset className="setup-section player-field"><legend>Players</legend><p className="field-help">{presetId!=="custom"||settings.playStyle==="turns"?"Enter names in turn order. The first player goes first.":"Add everyone playing. You can score for any player."}</p>
    {players.map((player,index)=><div className="player" key={index}><span aria-hidden="true">{index+1}</span><input aria-label={`Player ${index+1} name`} placeholder={`Player ${index+1}`} maxLength={30} autoComplete="off" value={player} onChange={e=>onPlayersChange(players.map((p,i)=>i===index?e.target.value:p))}/>{players.length>2&&<button type="button" className="remove-player" aria-label={`Remove player ${index+1}`} onClick={()=>onPlayersChange(players.filter((_,i)=>i!==index))}>×</button>}</div>)}
    <button type="button" className="link" disabled={players.length>=20} onClick={()=>onPlayersChange([...players,""])}>+ Add player</button>
   </fieldset>
-  <section className="setup-section scoring-section" aria-labelledby="scoring-title"><h2 id="scoring-title">{presetId==="scrabble"?"How scoring works":"Scoring rules"}</h2>
-   {presetId==="scrabble"?<div className="rules-summary"><p>{scrabbleSummary}</p></div>:<><div className="settings-grid">
+  <section className="setup-section scoring-section" aria-labelledby="scoring-title"><h2 id="scoring-title">{presetId!=="custom"?"How scoring works":"Scoring rules"}</h2>
+   {presetId!=="custom"?<div className="rules-summary"><p>{presetId==="phase10"?phase10Summary:scrabbleSummary}</p></div>:<><div className="settings-grid">
     <div><label htmlFor="play-style">Play style</label><select id="play-style" value={settings.playStyle} onChange={e=>onSettingsChange(changePlayStyle(settings,e.target.value as typeof settings.playStyle))}><option value="turns">Turn-based</option><option value="free">Free-for-all</option></select><p className="field-help">{settings.playStyle==="turns"?"Advance to the next player automatically.":"Keep the selected player after each score."}</p></div>
     <div><label htmlFor="score-mode">Score entry</label><select id="score-mode" value={settings.scoreMode} onChange={e=>onSettingsChange({...settings,scoreMode:e.target.value as typeof settings.scoreMode})}><option value="add">Add points</option><option value="total">Enter current total</option></select><p className="field-help">{settings.scoreMode==="add"?"Add each entry to the player’s total.":"Replace the total with the number entered."}</p></div>
     <div><label htmlFor="winner-rule">Winner</label><select id="winner-rule" value={settings.winner} onChange={e=>onSettingsChange({...settings,winner:e.target.value as typeof settings.winner})}><option value="high">Highest score</option><option value="low">Lowest score</option></select></div>
