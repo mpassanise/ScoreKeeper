@@ -71,7 +71,7 @@ function Scorekeeper(){
  async function refresh(){if(locked.current)return false;let failure:unknown,completed=false;await run(async()=>{try{if(session)await loadCloudGames();else await loadGames();if(view)setView(await api.get(view.game.id));completed=true}catch(e){failure=e;throw e}});if(failure)throw failure;return completed}
 
  useEffect(()=>{if(ready&&guest&&!session)void (view?AsyncStorage.setItem('scorekeeper-guest-active',view.game.id):AsyncStorage.removeItem('scorekeeper-guest-active')).catch(()=>setError('Could not remember the open game. Your scores are still saved.'))},[view,ready,guest,!!session]);
- function choosePreset(id:PresetId){setPresetId(id);if(id==="scrabble")setName("Scrabble");setError("")}
+ function choosePreset(id:PresetId){setPresetId(id);if(id==="scrabble")setName("Scrabble");else if(id==="phase10")setName("Phase 10");setError("")}
  const game=view?.game;
  async function create(){await run(async()=>{const result=await startGame({local:localApi,cloud:cloudApi,signedIn:!!session,name,players:names,winner,rules,uuid:Crypto.randomUUID});setView(result.view);setCreating(false);setGames(previous=>[{...result.view.game,turnCount:result.view.game.entries.length},...previous.filter(g=>g.id!==result.view.game.id)]);setNotice(result.message)})}
  async function noPoints(){if(!game||game.finished||game.playStyle==='free')return;Keyboard.dismiss();await action({action:'score',points:game.scoreMode==='total'?view!.totals[game.next]:0})}
