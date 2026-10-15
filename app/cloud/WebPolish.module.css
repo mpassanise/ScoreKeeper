@@ -97,3 +97,10 @@
 .app :global(.inline-score-actions button){flex:1;min-width:0;min-height:44px;padding:10px 12px}
 .app :global(.scoreboard-footer){display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 16px;margin-top:8px;font-size:13px}
 @media(max-width:600px){.app :global(.scoreboard){grid-template-columns:1fr}.app :global(.inline-player>.score){min-height:132px}.app :global(.inline-score-form){padding:0 16px 16px}.app :global(.inline-player>.score.current){padding:16px}}
+
+/* Score summary and controls share a row when the card is wide enough. */
+.app :global(.inline-player){container-type:inline-size}
+.app :global(.inline-player.active-player){display:flex;flex-wrap:wrap;align-items:stretch}
+.app :global(.inline-player.active-player>.score){flex:1 1 140px;width:auto;min-width:0}
+.app :global(.inline-score-form){flex:1 1 260px;min-width:0}
+@container(min-width:440px){.app :global(.inline-score-form){border-top:0;border-left:1px solid var(--border);padding:16px}.app :global(.inline-score-form>label){margin-top:0}}
