@@ -26,6 +26,7 @@ jobs:
       - run: node scripts/test-api-client.mjs
       - run: node scripts/test-frequent-players.mjs
       - run: node scripts/test-frequent-player-sync.mjs
+      - run: node scripts/test-game-list-cache.mjs
       - run: node scripts/test-local-games.mjs
       - run: node scripts/test-player-drag.mjs
       - run: node scripts/test-mobile-buttons.mjs
