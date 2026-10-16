@@ -53,6 +53,7 @@ export class ScorekeeperApi{
  deleteAccount(confirmation:string){return this.request<AccountDeletion>("/account/delete",{confirmation})}
  list(){return this.request<GameSummary[]>("/games")}
  get(id:string){return this.request<GameView>(`/games/${encodeURIComponent(id)}`)}
+ async deleteGame(game:Pick<Game,'id'|'version'>){try{return await this.request<{deleted:boolean}>(`/games/${encodeURIComponent(game.id)}/delete`,{expectedVersion:game.version})}catch(e){if(e instanceof ApiError&&e.status===404)throw new Error('Game deletion requires the latest API deployment. Your game has been kept.');throw e}}
  create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
  act(game:Game,action:Action){validateScoreAction(game,action);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
  import(game:Game){validateTargetScore(game);validateScoreLimit(game);validateTargetEnding(game);const save=()=>this.request<GameView>("/games/import",game);return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}

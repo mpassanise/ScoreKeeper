@@ -105,16 +105,27 @@
 .app :global(.inline-score-form){flex:1 1 260px;min-width:0}
 @container(min-width:440px){.app :global(.inline-score-form){border-top:0;border-left:1px solid var(--border);padding:16px}.app :global(.inline-score-form>label){margin-top:0}}
 
-/* Quiet standings strip; tiles retain their turn/manual order. */
-.app :global(.standings-toolbar){display:flex;align-items:flex-start;gap:16px;margin:24px 0 16px}
-.app :global(.standings){flex:1;min-width:0}
-.app :global(.standings-heading){display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px;margin-bottom:10px}
-.app :global(.standings-heading h2){font-size:15px;line-height:1.5;letter-spacing:0;margin:0}
-.app :global(.standings-heading p){font-size:13px;color:var(--muted-foreground);margin:0;overflow-wrap:anywhere}
+/* A single text size and one quiet summary line keep standings scannable. */
+.app :global(.standings-toolbar){margin:24px 0 16px}
+.app :global(.standings){min-width:0;font-size:15px;line-height:22px}
+.app :global(.standings-heading){display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;margin-bottom:10px}
+.app :global(.standings-heading h2){font-size:inherit;line-height:inherit;letter-spacing:0;font-weight:600;color:var(--muted-foreground);margin:0}
+.app :global(.standings-heading p){font-size:inherit;line-height:inherit;font-weight:400;color:var(--muted-foreground);margin:0}
 .app :global(.standings-list){display:flex;gap:8px;list-style:none;margin:0;padding:0 0 4px;overflow-x:auto}
-.app :global(.standing-pill){display:flex;align-items:center;gap:8px;flex-shrink:0;max-width:260px;padding:8px 12px;border:1px solid var(--border);border-radius:24px;background:var(--card);font-size:14px;color:var(--foreground)}
-.app :global(.standing-leader){background:var(--accent);border-color:var(--ring)}
-.app :global(.standing-rank){font-size:11px;color:var(--muted-foreground);font-weight:700;font-variant-numeric:tabular-nums}
-.app :global(.standing-name){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-.app :global(.standing-pill strong){font-size:15px;font-variant-numeric:tabular-nums;color:var(--secondary-foreground)}
-.app :global(.standings-toolbar>.link){flex-shrink:0;white-space:nowrap}
+.app :global(.standing-pill){display:flex;align-items:center;gap:10px;flex-shrink:0;max-width:280px;padding:10px 14px;border:0;border-radius:22px;background:var(--secondary);font-size:inherit;line-height:inherit;color:var(--foreground)}
+.app :global(.standing-leader){background:var(--accent)}
+.app :global(.standing-rank){color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.app :global(.standing-name){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:400}
+.app :global(.standing-pill strong){font-size:inherit;font-weight:700;font-variant-numeric:tabular-nums}
+.app :global(.scoreboard-footer){justify-content:flex-end;margin-top:8px}
+.app :global(.scoreboard-actions){display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:4px 24px}
+.app :global(.scoreboard-actions>.link){min-height:44px;padding:10px 0;font-size:14px;font-weight:600}
+.app :global(.inline-player.reordering){display:flex;flex-wrap:nowrap;align-items:center}
+.app :global(.inline-player.reordering>.score){flex:1;min-width:0;width:auto}
+.app :global(.inline-player.reordering>.player-move-controls){flex:0 0 48px;align-self:center;margin:0 12px 0 0}
+.app :global(.game-list-row){display:flex;align-items:center;gap:4px;padding-right:10px;overflow:hidden}
+.app :global(.game-list-row>.game-list-card){flex:1;min-width:0;border:0;border-radius:0;background:transparent;box-shadow:none}
+.app :global(.game-delete){flex:0 0 44px;width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;padding:0;color:var(--muted-foreground);border:0;border-radius:10px;background:transparent}
+.app :global(.game-delete:hover){color:var(--destructive);background:var(--accent)}
+.deleteDialogActions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:12px;margin-top:12px}
+.gameDeleteConfirm{min-height:44px;border-radius:10px;border:0;padding:10px 18px;background:#ad3838;color:white;font-weight:700}

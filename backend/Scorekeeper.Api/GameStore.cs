@@ -45,11 +45,13 @@ public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
  public async Task<Game?> Get(string owner,Guid id)
  {
   await using var c=await Connect();await using var q=c.CreateCommand();q.CommandText="SELECT State FROM dbo.Games WHERE OwnerId=@owner AND GameId=@id";q.Parameters.AddWithValue("@owner",owner);q.Parameters.AddWithValue("@id",id);
-  return await q.ExecuteScalarAsync() is string state?JsonSerializer.Deserialize<Game>(state,Json):null;
+  if(await q.ExecuteScalarAsync() is not string state)return null;
+  using var document=JsonDocument.Parse(state);if(document.RootElement.TryGetProperty("deleted",out var deleted)&&deleted.ValueKind==JsonValueKind.True)return null;
+  return JsonSerializer.Deserialize<Game>(state,Json);
  }
  public Task<object[]> List(string owner)=>Measure("list-games",async()=>
  {
-  await using var c=await Connect();await using var q=c.CreateCommand();q.CommandText="SELECT TOP (200) State FROM dbo.Games WHERE OwnerId=@owner ORDER BY Updated DESC";q.Parameters.AddWithValue("@owner",owner);
+  await using var c=await Connect();await using var q=c.CreateCommand();q.CommandText="SELECT TOP (200) State FROM dbo.Games WHERE OwnerId=@owner AND COALESCE(JSON_VALUE(State,'$.deleted'),'false')<>'true' ORDER BY Updated DESC";q.Parameters.AddWithValue("@owner",owner);
   await using var r=await q.ExecuteReaderAsync();var games=new List<object>();while(await r.ReadAsync()){var g=JsonSerializer.Deserialize<Game>(r.GetString(0),Json)!;games.Add(new{g.Id,g.Name,g.Players,g.Winner,g.PlayStyle,g.ScoreMode,g.PresetId,g.PresetVersion,g.EndCondition,g.RoundLimit,g.TargetScore,g.TargetEnd,g.Finished,g.Version,g.Updated,g.StartedAt,g.EndedAt,TurnCount=g.Entries.Length});}return games.ToArray();
  });
  public async Task<bool> Insert(string owner,Game g)
@@ -57,6 +59,14 @@ public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
   await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="INSERT INTO dbo.Games(OwnerId,GameId,Version,Updated,State) VALUES(@owner,@id,@version,@updated,@state)";Parameters(q,owner,g);
   try{await q.ExecuteNonQueryAsync();await tx.CommitAsync();return true;}catch(SqlException e)when(e.Number is 2601 or 2627){return false;}
+ }
+ // Retain only a deletion marker. The primary key prevents an old device's
+ // import from recreating this game; names, players and scores are removed.
+ public async Task<bool> DeleteGame(string owner,Guid id,long expected)
+ {
+  await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
+  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="UPDATE dbo.Games SET State=@state,Version=Version+1,Updated=SYSDATETIMEOFFSET() WHERE OwnerId=@owner AND GameId=@id AND Version=@expected AND COALESCE(JSON_VALUE(State,'$.deleted'),'false')<>'true' AND JSON_VALUE(State,'$.finished')='false'";
+  q.Parameters.AddWithValue("@owner",owner);q.Parameters.AddWithValue("@id",id);q.Parameters.AddWithValue("@expected",expected);q.Parameters.AddWithValue("@state",JsonSerializer.Serialize(new{deleted=true},Json));var changed=await q.ExecuteNonQueryAsync()==1;await tx.CommitAsync();return changed;
  }
  public async Task<bool> Replace(string owner,Game g,long expected)
  {

@@ -163,3 +163,29 @@ console.log('Target round endings: remaining turns, final winners, ties, correct
  const pending=await pendingImports(local,conflictCloud);assert.equal(pending.length,1,'different device scores remain visible and pending');await assert.rejects(()=>importPendingGames(local,conflictCloud,true,()=>{},true),/device copy was kept/);assert.equal((await local.get(play.game.id)).game.deviceOnly,true);
  console.log('Fallback account backup, retained originals, lost acknowledgement recovery and differing-copy protection passed.');
 }
+
+// Deletion preserves other games, rejects stale versions and finished games,
+// and leaves storage untouched if writing fails.
+const deleteTarget=await api.create(randomUUID(),'Delete me',['A','B'],'high');
+const changedDeleteTarget=await api.act(deleteTarget.game,{action:'score',points:8});
+await assert.rejects(()=>api.deleteGame(deleteTarget.game),e=>e.status===409);
+const finishedDeleteTarget=await api.act(changedDeleteTarget.game,{action:'finish'});
+await assert.rejects(()=>api.deleteGame(finishedDeleteTarget.game),/in-progress/);
+const reopened=await api.act(finishedDeleteTarget.game,{action:'resume'});
+const beforeDeleteIds=(await api.list()).map(g=>g.id).filter(id=>id!==reopened.game.id);
+const protectedData=raw;
+const failingDelete=new LocalGames({read:async()=>raw,write:async()=>{throw new Error('Storage full')}},randomUUID);
+await assert.rejects(()=>failingDelete.deleteGame(reopened.game),/Storage full/);
+assert.equal(raw,protectedData);
+await api.deleteGame(reopened.game);
+assert.deepEqual((await api.list()).map(g=>g.id),beforeDeleteIds);
+await assert.rejects(()=>api.get(reopened.game.id),/not found/);
+await api.deleteGame(reopened.game); // repeat confirmation after a lost response is safe
+// A deleted cloud game's stale device copy must not be re-imported.
+
+const {importPendingGames:importDeleted}=await import(pathToFileURL(path.join(output,'game-import.js')).href);
+const staleCopy=await api.create(randomUUID(),'Already deleted',['A','B'],'high');
+let deletionForgot=false,pendingDelete=-1;
+const resultDeleted=await importDeleted({read:async()=>[staleCopy.game],forget:async id=>{assert.equal(id,staleCopy.game.id);deletionForgot=true}}, {list:async()=>[],get:async()=>{throw new ApiError(404,'Missing')},import:async()=>{throw new ApiError(410,'Deleted','GAME_DELETED')}},true,n=>{pendingDelete=n},true);
+assert.equal(resultDeleted.deleted,1);assert.equal(deletionForgot,true);assert.equal(pendingDelete,0);
+console.log('Local deletion: conflicts, completed-game protection, storage failure, unrelated games and deleted-cloud import cleanup passed.');
