@@ -63,6 +63,30 @@ try{
  assert.equal(isConnectionFailure(new Error('Invalid points')),false);
  assert.equal(isConnectionFailure({status:409}),false);
  const failed=createConnectionStatus();failed.reset('A');await failed.connect(async()=>{});failed.fail({errorCode:'timed_out'});assert.equal(failed.getSnapshot().status,'unavailable','foreground connection failures expose Reconnect after a prior successful refresh');
+
+ {
+  const reports=[],c=createConnectionStatus(15000,value=>reports.push(value));c.reset('A');
+  const secret='private@example.test bearer-secret https://example.test/?code=private';
+  await c.connect(async(_valid,_signal,step)=>{await step('games',async()=>{throw {status:503,code:'DATABASE_WAKING',message:secret,requestId:'12345678-1234-1234-1234-123456789abc'}})});
+  assert.equal(c.getSnapshot().diagnostic.stage,'games');assert.equal(c.getSnapshot().diagnostic.code,'DATABASE_WAKING');
+  assert.equal(c.getSnapshot().diagnostic.httpStatus,503);assert.equal(reports.length,1);
+  assert.ok(!JSON.stringify(reports).includes('private'));assert.ok(!JSON.stringify(reports).includes('bearer-secret'));
+  assert.equal(reports[0].requestId,'12345678-1234-1234-1234-123456789abc');
+  await c.connect(async(_valid,_signal,step)=>{await step('account',async()=>{throw {code:secret,requestId:secret}})});
+  assert.equal(c.getSnapshot().diagnostic.code,'UNCLASSIFIED_ERROR');assert.equal(c.getSnapshot().diagnostic.requestId,undefined);
+  assert.ok(!JSON.stringify(reports).includes('private'));
+  await c.connect(async()=>{});assert.equal(c.getSnapshot().diagnostic,undefined,'success clears stale failure details');
+  await c.connect(async(_valid,_signal,step)=>step('authentication',async()=>{throw {errorCode:'interaction_required',message:secret}}));
+  assert.equal(c.getSnapshot().status,'sign-in');assert.equal(c.getSnapshot().diagnostic.stage,'authentication');
+ }
+ mock.timers.enable({apis:['setTimeout']});
+ try{
+  const reports=[],c=createConnectionStatus(15000,value=>reports.push(value));c.reset('A');
+  const pending=deferred();const p=c.connect(async(_valid,_signal,step)=>Promise.all([step('games',()=>pending.promise),step('authentication',()=>pending.promise)]).then(()=>{}));
+  await turn();mock.timers.tick(15000);assert.equal(await p,false);assert.equal(c.getSnapshot().diagnostic.stage,'authentication');
+  assert.equal(c.getSnapshot().diagnostic.code,'RECONNECT_TIMEOUT');assert.equal(reports.length,1);
+  pending.resolve();await turn();assert.equal(reports.length,1,'late completion emits no extra failure');
+ }finally{mock.timers.reset()}
  console.log('Connection recovery: single-flight, account isolation, offline/retry, auth classification, bounded timeout, cancelled I/O and token-wait cancellation passed.');
 }finally{globalThis.fetch=originalFetch;rmSync(output,{recursive:true,force:true})}
 
