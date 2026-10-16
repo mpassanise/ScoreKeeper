@@ -14,7 +14,7 @@ import {useThemeStyles,useTheme,ThemeProvider} from './Theme';
 import DragHandle,{DraggablePlayer} from './DragHandle';
 import {isScoreInput} from '../shared/score-input';
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
-import {createConnectionStatus,isConnectionFailure} from '../shared/connection-status';
+import {createConnectionStatus,isConnectionFailure,RECONNECT_WATCHDOG_MS} from '../shared/connection-status';
 import ConnectionStatus from './ConnectionStatus';
 import {Alert,AppState,Keyboard,KeyboardAvoidingView,LayoutAnimation,Modal,Platform,Pressable,RefreshControl,ScrollView,StatusBar,StyleSheet,Text,TextInput,View} from 'react-native';
 import {SafeAreaProvider,SafeAreaView} from 'react-native-safe-area-context';
@@ -69,7 +69,7 @@ function Scorekeeper(){
  const [presetId,setPresetId]=useState<PresetId>("custom"),[settings,setSettings]=useState(defaultSettings);
  const {rules,winner}=setupRules(presetId,settings);
  const identityRevision=useRef(0),sessionWrites=useRef(Promise.resolve());
- const [connection]=useState(()=>createConnectionStatus(15000,value=>console.warn('[Scorekeeper connection]',value)));
+ const [connection]=useState(()=>createConnectionStatus(RECONNECT_WATCHDOG_MS,value=>console.warn('[Scorekeeper connection]',value)));
  const connectionState=useSyncExternalStore(connection.subscribe,connection.getSnapshot,connection.getSnapshot);
  useEffect(()=>()=>connection.reset(null),[connection]);
  const current=useRef<Session|null>(null),locked=useRef(false),renewing=useRef<Promise<string>|null>(null);

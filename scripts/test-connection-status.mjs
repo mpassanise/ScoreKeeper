@@ -55,6 +55,25 @@ try{
   const once=new ScorekeeperApi('https://example.test',async()=>'token',{readAttempts:1});
   await assert.rejects(once.list(),e=>e.code==='DATABASE_WAKING');assert.equal(requests,1);
  }finally{mock.timers.reset()}
+ mock.timers.enable({apis:['setTimeout']});
+ try{
+  const c=createConnectionStatus(),pending=deferred();c.reset('A');let signal;
+  globalThis.fetch=async(_url,options)=>{signal=options.signal;await pending.promise;return {ok:true,json:async()=>[]}};
+  const work=c.connect(async(_valid,s,step)=>step('games',()=>new ScorekeeperApi('https://example.test',async()=>'token',{signal:s,readAttempts:1}).list()));
+  await turn();mock.timers.tick(15000);await turn();
+  assert.equal(signal.aborted,false,'15-second slow notice must not cancel API I/O');
+  assert.equal(c.getSnapshot().status,'connecting');assert.equal(c.getSnapshot().slow,true);
+  mock.timers.tick(5000);pending.resolve();assert.equal(await work,true);assert.equal(c.getSnapshot().slow,false);
+  const hanging=deferred();globalThis.fetch=async()=>hanging.promise;
+  const timed=c.connect(async(_valid,s,step)=>step('games',()=>new ScorekeeperApi('https://example.test',async()=>'token',{signal:s,readAttempts:1}).list()));
+  await turn();mock.timers.tick(30000);await turn();assert.equal(await timed,false);
+  assert.equal(c.getSnapshot().diagnostic.code,'REQUEST_TIMEOUT','API timeout is preserved instead of outer watchdog');
+  assert.equal(c.getSnapshot().diagnostic.stage,'games');
+  const guard=c.connect(async(_valid,_s,step)=>Promise.all([step('games',()=>hanging.promise),step('players',()=>hanging.promise)]).then(()=>{}));
+  await turn();mock.timers.tick(120000);await turn();assert.equal(await guard,false);
+  assert.equal(c.getSnapshot().diagnostic.code,'RECONNECT_TIMEOUT');
+  assert.deepEqual(c.getSnapshot().diagnostic.pendingStages,['games','players']);
+ }finally{mock.timers.reset()}
  assert.equal(needsSignIn({params:{error:'invalid_grant'}}),true);
  assert.equal(needsSignIn({status:401}),true);
  assert.equal(needsSignIn({errorCode:'timed_out'}),false,'a timeout alone does not prove interaction is required');
