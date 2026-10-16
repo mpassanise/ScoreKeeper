@@ -7,7 +7,7 @@ export type ConfirmedSnapshot={schemaVersion:1;profileId:string;gameId:string;se
 export type ConfirmedGames={
  readConfirmed(profileId:string,gameId:string):Promise<ConfirmedSnapshot|null>;
  saveConfirmed(profileId:string,views:GameView[]):Promise<void>;
- close():void;
+ close():void|Promise<void>;
 };
 export class LocalRepositoryError extends Error{
  constructor(readonly code:'INVALID_SNAPSHOT'|'VERSION_COLLISION'|'STORAGE_UNAVAILABLE'|'STORAGE_BLOCKED'|'STORAGE_CORRUPT',message:string){super(message);this.name='LocalRepositoryError'}

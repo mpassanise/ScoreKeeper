@@ -43,10 +43,14 @@ The emulator verifies transaction behavior, not physical filesystem durability, 
 
 ## Next activation gates and continuation
 
-1. Validate the native SQLite adapter against the installed Expo SDK in a local spike; record dependency/build impact and crash recovery. AsyncStorage remains untouched as a migration source.
+1. Native adapter spike implemented: see [SQLite repository evidence](SQLITE_REPOSITORY.md). SDK type compatibility and file-backed desktop transaction/restart checks pass. Expo bridge and physical iPhone acceptance remain open; AsyncStorage remains untouched as a migration source.
 2. Settle verified profile binding, offline account selection, explicit sign-out/account deletion, local device privacy and storage error UX for both platforms.
 3. Add a recoverable copy/validate/mark migration journal with representative legacy fixtures, exact IDs/content verification and explicit adoption. Keep originals; no automatic guest transfer or inferred acknowledgement.
 4. Wire confirmed-read caching behind an independent rollout flag, initially disabled. Distinguish cached read-only views from writable local games; avoid stale resurrection after deletion and late writes after account switch/deletion. Validate browser quota, upgrade blocking and two-tab behavior.
 5. Implement additive replay-safe API and local operation/projection transactions before enabling offline account scoring. Never retry legacy scoring POSTs or claim queued changes are synced without durable receipts.
 
 Rollback for this iteration: remove the unused modules/tests without changing live behavior. There is no activated data migration to reverse. Once any future queued writer is enabled, rollback needs the queue-aware recovery procedure in the rollout plan.
+
+## Native counterpart
+
+The inactive SQLite adapter now implements the same contract. `close()` permits a Promise so native closure can await queued transactions; web closure remains synchronous. Shared snapshot validation/version collision rules are reused. This does not activate either adapter or close migration/account-lifecycle gates.
