@@ -101,6 +101,27 @@ roster=FrequentPlayers.Apply(roster,new(Guid.NewGuid(),"remove","MICHAEL"));Chec
 Throws<ArgumentException>(()=>FrequentPlayers.Apply([],new(Guid.Empty,"add","Mike")),"operation ID required");
 Throws<ArgumentException>(()=>FrequentPlayers.Apply([],new(Guid.NewGuid(),"rename","Mike")),"rename source required");
 Throws<ArgumentException>(()=>FrequentPlayers.Apply([],new(Guid.NewGuid(),"add",new string('x',31))),"frequent name limit");
+// Editing rules must preserve history and scoring semantics.
+var editableGame=Scoring.Create(Guid.NewGuid(),"Editable",["A","B"],"high",presetId:"custom");
+editableGame=Scoring.Apply(editableGame,new(editableGame.Version,"score",12));editableGame=Scoring.Apply(editableGame,new(editableGame.Version,"score",4));
+var beforeRules=editableGame;var safeRules=new GameRuleEdit("  Friday game  ","low","target",TargetScore:100);
+editableGame=Scoring.Apply(editableGame,new(editableGame.Version,"rules",Rules:safeRules));
+Check(editableGame.Name=="Friday game"&&editableGame.Winner=="low"&&editableGame.Version==beforeRules.Version+1&&!editableGame.Finished,"custom edits update allowed fields without completing");
+Check(editableGame.Entries.SequenceEqual(beforeRules.Entries)&&editableGame.Players.SequenceEqual(beforeRules.Players)&&editableGame.Next==beforeRules.Next&&editableGame.StartedAt==beforeRules.StartedAt&&editableGame.PlayStyle==beforeRules.PlayStyle&&editableGame.ScoreMode==beforeRules.ScoreMode,"editing preserves history, roster, next player, start and semantics");
+Throws<InvalidOperationException>(()=>Scoring.Apply(editableGame,new(beforeRules.Version,"rules",Rules:safeRules)),"stale rule edits rejected");
+foreach(var badRules in new[]{safeRules with{Name=""},safeRules with{Winner="bad"},safeRules with{EndCondition="bad"},safeRules with{TargetScore=12},safeRules with{TargetScore=100001},safeRules with{EndCondition="rounds",RoundLimit=1},safeRules with{EndCondition="rounds",RoundLimit=5001}})Throws<ArgumentException>(()=>Scoring.Apply(editableGame,new(editableGame.Version,"rules",Rules:badRules)),"unsafe/invalid rules rejected");
+editableGame=Scoring.Apply(editableGame,new(editableGame.Version,"rules",Rules:new("Rounds","high","rounds",RoundLimit:2)));
+Check(editableGame.TargetScore is null&&editableGame.TargetEnd=="immediate","irrelevant target settings cleared");
+editableGame=Scoring.Apply(editableGame,new(editableGame.Version,"score",1));editableGame=Scoring.Apply(editableGame,new(editableGame.Version,"score",1));Check(editableGame.Finished,"edited ending applies to future scores");
+Throws<ArgumentException>(()=>Scoring.Apply(editableGame,new(editableGame.Version,"rules",Rules:safeRules)),"completed custom games cannot be configured");
+var presetEdit=Scoring.Create(Guid.NewGuid(),"Preset",["A","B"],"high",presetId:"scrabble");Throws<ArgumentException>(()=>Scoring.Apply(presetEdit,new(presetEdit.Version,"rules",Rules:safeRules)),"presets cannot be configured");
+var freeEditGame=Scoring.Create(Guid.NewGuid(),"Free",["A","B"],"high",playStyle:"free");Throws<ArgumentException>(()=>Scoring.Apply(freeEditGame,new(freeEditGame.Version,"rules",Rules:safeRules with{EndCondition="rounds",RoundLimit=10})),"edit cannot force a change in play style");Throws<ArgumentException>(()=>Scoring.Apply(freeEditGame,new(freeEditGame.Version,"rules",Rules:safeRules with{TargetEnd="round"})),"free edits reject round target modifier");
+var historicalEdit=Scoring.Create(Guid.NewGuid(),"Snapshots",["A","B"],"high",scoreMode:"total");historicalEdit=Scoring.Apply(historicalEdit,new(historicalEdit.Version,"score",80));historicalEdit=Scoring.Apply(historicalEdit,new(historicalEdit.Version,"score",0));historicalEdit=Scoring.Apply(historicalEdit,new(historicalEdit.Version,"score",10));
+Throws<ArgumentException>(()=>Scoring.Apply(historicalEdit,new(historicalEdit.Version,"rules",Rules:safeRules with{TargetScore=50,TargetEnd="round"})),"new round target cannot retroactively trigger an old round");
+historicalEdit=Scoring.Apply(historicalEdit,new(historicalEdit.Version,"rules",Rules:safeRules with{TargetScore=50}));Check(!historicalEdit.Finished,"immediate edited threshold uses current totals");
+var activeFinalEdit=Scoring.Create(Guid.NewGuid(),"Final",["A","B"],"high","target",targetScore:20,targetEnd:"round");activeFinalEdit=Scoring.Apply(activeFinalEdit,new(activeFinalEdit.Version,"score",20));var savedFinalNext=activeFinalEdit.Next;
+activeFinalEdit=Scoring.Apply(activeFinalEdit,new(activeFinalEdit.Version,"rules",Rules:new("Renamed final","low","target",TargetScore:20,TargetEnd:"round")));Check(!activeFinalEdit.Finished&&activeFinalEdit.Next==savedFinalNext&&Scoring.TargetEndRound(activeFinalEdit)==1,"rename/winner edit preserves active final round");
+activeFinalEdit=Scoring.Apply(activeFinalEdit,new(activeFinalEdit.Version,"rules",Rules:new("Manual again","low","manual")));Check(activeFinalEdit.TargetScore is null&&Scoring.TargetEndRound(activeFinalEdit) is null,"manual ending releases final-round restriction");
 Console.WriteLine($"{checks} scoring and deletion checks passed.");
 sealed class FakeDeletionStore:IAccountDeletionStore
 {
