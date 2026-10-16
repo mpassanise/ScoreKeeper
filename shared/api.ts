@@ -13,19 +13,29 @@ export type Action={rules?:GameRuleEdit;action:"score"|"edit"|"select"|"undo"|"f
 export type AccountStatus={gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message)}}
+function cancelled(){return new ApiError(499,'Connection attempt cancelled.','REQUEST_CANCELLED')}
+async function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T>{
+ if(!signal)return work;
+ let abort:()=>void=()=>{};
+ try{return await Promise.race([work,new Promise<T>((_,reject)=>{abort=()=>reject(cancelled());signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort()})])}
+ finally{signal.removeEventListener('abort',abort)}
+}
 export class ScorekeeperApi{
- constructor(private base:string,private token:()=>Promise<string>){if(!/^https:\/\//.test(base)&&!/^http:\/\/localhost(?::\d+)?(?:\/|$)/.test(base))throw new Error("Use HTTPS for the API.")}
+ constructor(private base:string,private token:()=>Promise<string>,private options:{signal?:AbortSignal;readAttempts?:number}={}){if(!/^https:\/\//.test(base)&&!/^http:\/\/localhost(?::\d+)?(?:\/|$)/.test(base))throw new Error("Use HTTPS for the API.")}
  // Token acquisition and API I/O have separate budgets. A cold Function/SQL
  // connection must not lose its entire budget to a silent token refresh.
  private async accessToken(){
   let timer:ReturnType<typeof setTimeout>;
-  try{return await Promise.race([this.token(),new Promise<string>((_,reject)=>{timer=setTimeout(()=>reject(new ApiError(408,'Sign-in token refresh timed out. Please sign out and sign in again.')),30000)})])}finally{clearTimeout(timer!)}
+  try{return await Promise.race([this.token(),new Promise<string>((_,reject)=>{timer=setTimeout(()=>reject(new ApiError(408,'Sign-in token refresh timed out. Use Reconnect to try again.')),30000)})])}finally{clearTimeout(timer!)}
  }
  private async request<T>(path:string,body?:unknown):Promise<T>{
-  const accessToken=await this.accessToken(),read=body===undefined;
+  const signal=this.options.signal;if(signal?.aborted)throw cancelled();
+  const accessToken=await abortable(this.accessToken(),signal),read=body===undefined;
+  const attempts=read?Math.max(1,Math.min(3,this.options.readAttempts??3)):1;
   // Retry only safe reads. A timed-out write may already have committed.
-  for(let attempt=0;attempt<(read?3:1);attempt++){
-   const controller=new AbortController(),started=Date.now();let timer:ReturnType<typeof setTimeout>;
+  for(let attempt=0;attempt<attempts;attempt++){
+   if(signal?.aborted)throw cancelled();
+   const controller=new AbortController(),started=Date.now(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});let timer:ReturnType<typeof setTimeout>;
    try{
     const work=async()=>{
      const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},body:read?undefined:JSON.stringify(body),signal:controller.signal});
@@ -39,11 +49,11 @@ export class ScorekeeperApi{
      }
      return value as T;
     };
-    return await Promise.race([work(),new Promise<T>((_,reject)=>{timer=setTimeout(()=>{reject(new ApiError(408,read?'Account service did not respond in time. Please try Sync Games again.':'Save confirmation timed out. Refresh before retrying; the change may already be saved.','REQUEST_TIMEOUT'));controller.abort()},30000)})]);
+    return await abortable(Promise.race([work(),new Promise<T>((_,reject)=>{timer=setTimeout(()=>{reject(new ApiError(408,read?'Account service did not respond in time. Please try Sync Games again.':'Save confirmation timed out. Refresh before retrying; the change may already be saved.','REQUEST_TIMEOUT'));controller.abort()},30000)})]),signal);
    }catch(error){
     const transient=error instanceof ApiError&&(error.code==='REQUEST_TIMEOUT'||error.code==='DATABASE_WAKING');
-    if(!read||!transient||attempt===2)throw error;
-   }finally{clearTimeout(timer!)}
+    if(!read||!transient||attempt===attempts-1)throw error;
+   }finally{clearTimeout(timer!);signal?.removeEventListener('abort',abort)}
    await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
   }
   throw new ApiError(503,'Account service is unavailable.');
