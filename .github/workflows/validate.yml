@@ -29,6 +29,7 @@ jobs:
       - run: node scripts/test-game-list-cache.mjs
       - run: node scripts/test-standings.mjs
       - run: node scripts/test-local-games.mjs
+      - run: node scripts/test-sync-safety.mjs
       - run: node scripts/test-player-drag.mjs
       - run: node scripts/test-mobile-buttons.mjs
       - run: pnpm exec tsc --noEmit
