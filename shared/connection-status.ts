@@ -1,14 +1,30 @@
-export type ConnectionState={status:'idle'|'connecting'|'connected'|'unavailable'|'offline'|'sign-in';lastConnectedAt:number|null};
+export type ConnectionStage='authentication'|'account'|'games'|'game'|'players'|'imports'|'device'|'unknown';
+export type ConnectionDiagnostic={attempt:string;stage:ConnectionStage;code:string;elapsedMs:number;httpStatus?:number;requestId?:string};
+export type ConnectionState={status:'idle'|'connecting'|'connected'|'unavailable'|'offline'|'sign-in';lastConnectedAt:number|null;diagnostic?:ConnectionDiagnostic};
+export type ConnectionStep=<T>(stage:ConnectionStage,work:()=>Promise<T>)=>Promise<T>;
+class StepError extends Error{constructor(readonly stage:ConnectionStage,readonly original:unknown){super('Connection step failed')}}
+function originalError(error:unknown):unknown{return error instanceof StepError?error.original:error}
 export function needsSignIn(error:unknown):boolean{
+ error=originalError(error);
  if(!error||typeof error!=='object')return false;
  const e=error as {status?:number;errorCode?:string;code?:string;params?:{error?:string}};
  return e.status===401||['interaction_required','login_required','consent_required','invalid_grant','no_account_error','SIGN_IN_REQUIRED'].includes(e.params?.error||e.errorCode||e.code||'');
 }
 export function isConnectionFailure(error:unknown):boolean{
+ error=originalError(error);
  if(needsSignIn(error)||error instanceof TypeError)return true;
  if(!error||typeof error!=='object')return false;
  const e=error as {status?:number;errorCode?:string};
  return e.status===0||e.status===408||e.status===429||(typeof e.status==='number'&&e.status>=500)||e.errorCode==='timed_out'||!!e.errorCode?.includes('timeout');
+}
+const safeCodes=new Set(['interaction_required','login_required','consent_required','invalid_grant','no_account_error','SIGN_IN_REQUIRED','timed_out','monitor_window_timeout','monitor_popup_timeout','block_iframe_reload','interaction_in_progress','no_network_connectivity','REQUEST_TIMEOUT','REQUEST_CANCELLED','DATABASE_WAKING','DATABASE_UNAVAILABLE','ACCOUNT_DELETION_PENDING','GAME_DELETED','PROFILE_MISMATCH','RECONNECT_TIMEOUT']);
+function diagnostic(error:unknown,attempt:string,stage:ConnectionStage,started:number):ConnectionDiagnostic{
+ const source=originalError(error);
+ const e=(source&&typeof source==='object'?source:{}) as {status?:unknown;code?:unknown;errorCode?:unknown;params?:{error?:unknown};requestId?:unknown};
+ const code=e.params?.error||e.errorCode||e.code;
+ const status=typeof e.status==='number'&&Number.isInteger(e.status)&&e.status>=0&&e.status<=599?e.status:undefined;
+ const requestId=typeof e.requestId==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(e.requestId)?e.requestId:undefined;
+ return {attempt,stage:error instanceof StepError?error.stage:stage,code:typeof code==='string'&&safeCodes.has(code)?code:source instanceof TypeError?'NETWORK_ERROR':'UNCLASSIFIED_ERROR',elapsedMs:Math.max(0,Date.now()-started),...(status!==undefined?{httpStatus:status}:{}),...(requestId?{requestId}:{})};
 }
 export function connectionText(state:ConnectionState){switch(state.status){
  case 'connecting':return 'Connecting to your account…';
@@ -18,26 +34,40 @@ export function connectionText(state:ConnectionState){switch(state.status){
  case 'unavailable':return 'Account sync unavailable';
  default:return 'Account connection not checked';
 }}
-export function createConnectionStatus(timeoutMs=15000){
+export function connectionFailureText(stage:ConnectionStage){
+ return {authentication:'Sign-in could not finish.',account:'Account settings could not be loaded.',games:'Saved games could not be loaded.',game:'The open game could not be refreshed.',players:'Frequent players could not be synced.',imports:'Local import checks could not finish.',device:'Saved device data could not be read.',unknown:'The connection could not be completed.'}[stage];
+}
+export function createConnectionStatus(timeoutMs=15000,report?:(value:ConnectionDiagnostic)=>void){
  let state:ConnectionState={status:'idle',lastConnectedAt:null},identity:string|null=null,generation=0;
  let flight:Promise<boolean>|null=null,cancel:(()=>void)|null=null;
  const listeners=new Set<()=>void>();
  const publish=(patch:Partial<ConnectionState>)=>{state={...state,...patch};listeners.forEach(fn=>fn())};
+ const emit=(value:ConnectionDiagnostic)=>{try{report?.(value)}catch{/* Diagnostics cannot break recovery. */}};
  function invalidate(){generation++;cancel?.();cancel=null;flight=null}
- function reset(next:string|null){if(identity===next)return;invalidate();identity=next;publish({status:'idle',lastConnectedAt:null})}
- function offline(){invalidate();publish({status:'offline'})}
- function fail(error:unknown){invalidate();publish({status:needsSignIn(error)?'sign-in':'unavailable'})}
- function connect(work:(isCurrent:()=>boolean,signal:AbortSignal)=>Promise<void>):Promise<boolean>{
+ function reset(next:string|null){if(identity===next)return;invalidate();identity=next;publish({status:'idle',lastConnectedAt:null,diagnostic:undefined})}
+ function offline(){invalidate();publish({status:'offline',diagnostic:undefined})}
+ function fail(error:unknown){invalidate();const value=diagnostic(error,'action-'+generation,'unknown',Date.now());publish({status:needsSignIn(error)?'sign-in':'unavailable',diagnostic:value});emit(value)}
+ function connect(work:(isCurrent:()=>boolean,signal:AbortSignal,step:ConnectionStep)=>Promise<void>):Promise<boolean>{
   if(flight)return flight;
   if(identity===null)return Promise.resolve(false);
-  const attempt=++generation,controller=new AbortController();
+  const attempt=++generation,controller=new AbortController(),started=Date.now(),attemptId='connect-'+started.toString(36)+'-'+attempt;
   const valid=()=>attempt===generation&&identity!==null;
-  let timer:ReturnType<typeof setTimeout>;
-  publish({status:'connecting'});
-  // Cancellation/timeouts stop UI ownership, not server writes. Only read/sync
-  // work with its own replay-safe contract belongs here; never score commands.
-  const stopped=new Promise<boolean>(resolve=>{cancel=()=>{controller.abort();resolve(false)};timer=setTimeout(()=>{if(valid()){generation++;controller.abort();publish({status:'unavailable'})}resolve(false)},timeoutMs)});
-  const workResult=Promise.resolve().then(()=>work(valid,controller.signal)).then(()=>{if(!valid())return false;publish({status:'connected',lastConnectedAt:Date.now()});return true},error=>{if(!valid())return false;publish({status:needsSignIn(error)?'sign-in':'unavailable'});return false});
+  let timer:ReturnType<typeof setTimeout>,sequence=0;
+  const pending=new Map<number,ConnectionStage>();
+  const step:ConnectionStep=async(stage,run)=>{const id=++sequence;pending.set(id,stage);try{return await run()}catch(error){throw error instanceof StepError?error:new StepError(stage,error)}finally{pending.delete(id)}};
+  publish({status:'connecting',diagnostic:undefined});
+  const stopped=new Promise<boolean>(resolve=>{
+   cancel=()=>{controller.abort();resolve(false)};
+   timer=setTimeout(()=>{
+    if(valid()){
+     const stages=[...pending.values()],stage=stages.includes('authentication')?'authentication':stages[0]||'unknown';
+     const value=diagnostic({code:'RECONNECT_TIMEOUT'},attemptId,stage,started);
+     generation++;controller.abort();publish({status:'unavailable',diagnostic:value});emit(value);
+    }
+    resolve(false);
+   },timeoutMs);
+  });
+  const workResult=Promise.resolve().then(()=>work(valid,controller.signal,step)).then(()=>{if(!valid())return false;publish({status:'connected',lastConnectedAt:Date.now(),diagnostic:undefined});return true},error=>{if(!valid())return false;const value=diagnostic(error,attemptId,'unknown',started);publish({status:needsSignIn(error)?'sign-in':'unavailable',diagnostic:value});emit(value);return false});
   const result=Promise.race([workResult,stopped]).finally(()=>{clearTimeout(timer);if(flight===result){flight=null;cancel=null}});
   flight=result;return result;
  }
