@@ -12,7 +12,7 @@ export type GameRuleEdit={name:string;winner:"high"|"low";endCondition:"manual"|
 export type Action={rules?:GameRuleEdit;action:"score"|"edit"|"select"|"undo"|"finish"|"resume"|"rules";points?:number;playerId?:string;entryId?:string};
 export type AccountStatus={gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
-export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message)}}
+export class ApiError extends Error{constructor(public status:number,message:string,public code?:string,public requestId?:string){super(message)}}
 function cancelled(){return new ApiError(499,'Connection attempt cancelled.','REQUEST_CANCELLED')}
 async function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T>{
  if(!signal)return work;
@@ -45,7 +45,7 @@ export class ScorekeeperApi{
       const message=typeof data.error==="string"?data.error:"Request failed.";
       const details=[`${read?'GET':'POST'} ${path.replace(/\/games\/[^/]+/, '/games/:id')}`,`HTTP ${response.status}`,`attempt ${attempt+1}`,`${Date.now()-started} ms`,typeof data.code==='string'?data.code:'',typeof data.stage==='string'?`stage=${data.stage}`:'',typeof data.sqlNumber==='number'?`SQL ${data.sqlNumber}`:''].filter(Boolean).join(' · ');
       const reference=typeof data.requestId==="string"?` Reference: ${data.requestId}.`:"";
-      throw new ApiError(response.status,message+reference+` Details: ${details}.`,typeof data.code==="string"?data.code:undefined);
+      throw new ApiError(response.status,message+reference+` Details: ${details}.`,typeof data.code==="string"?data.code:undefined,typeof data.requestId==="string"?data.requestId:undefined);
      }
      return value as T;
     };
