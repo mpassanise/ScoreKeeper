@@ -137,7 +137,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 | Plan | Merged | PR #50; no runtime changes. |
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
 | 1 | In progress | [Connection recovery](CONNECTION_RECOVERY.md): iteration 1 published on web; iteration 2 adds the existing-root MSAL bridge and redacted failure details. Real-session/device acceptance remains open. |
-| 2 | In progress | Iteration 1: inactive confirmed-snapshot IndexedDB foundation; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
+| 2 | In progress | Iterations 1–2: inactive confirmed-snapshot IndexedDB and SQLite foundations; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
 | 3 | Not started | Additive replay-safe API. |
 | 4 | Not started | Local-first pilot. |
 | 5 | Not started | Cross-device recovery and rollout. |
@@ -155,3 +155,7 @@ Recheck documentation against installed versions during implementation. This pla
 ### Phase 2 continuation, iteration 1
 
 The confirmed-read repository now has a shared contract and a web IndexedDB adapter. It is not imported or opened by either application. Existing storage keys and write paths remain unchanged. Tests cover complete snapshots, account separation, concurrent connection ordering, transaction rollback, version collisions and invalid/corrupt storage. These emulated tests do not close physical-device, browser quota, eviction, privacy or migration gates. Next: native SQLite adapter spike and identity/privacy decisions, then copy/validate migration and controlled confirmed-read caching. Offline account writes stay disabled until replay-safe API capability and local operation transactions are verified.
+
+### Phase 2 continuation, iteration 2
+
+Added an inactive SQLite confirmed-snapshot adapter implementing the same account/game contract as IndexedDB, plus file-backed SQLite failure tests. The port was typechecked against expo-sqlite 57.0.4, recommended by the installed Expo 57.0.27 SDK; the native package is not added to mobile dependencies or loaded by the app. The desktop SQLite harness covers pre-commit process termination and committed content after abrupt process exit; it does not establish iOS native bridge/OS durability. CI runs the adapter tests. No storage migration, account cache activation, local scoring queue or API replay capability is enabled. Next: identity/privacy and account lifecycle contract, then recoverable copy/validate migration fixtures and native on-device acceptance before enabling confirmed-read caching. See [native adapter evidence and build impact](SQLITE_REPOSITORY.md).
