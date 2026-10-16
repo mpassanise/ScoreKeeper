@@ -89,3 +89,17 @@ const playerChanges=[{id:'00000000-0000-0000-0000-000000000001',kind:'add',name:
 globalThis.fetch=async(url,options)=>{assert.ok(url.endsWith('/players/sync'));assert.equal(options.method,'POST');assert.deepEqual(JSON.parse(options.body),{profileId:'profile-a',changes:playerChanges});return {ok:true,json:async()=>({names:['Mike']})}};
 assert.deepEqual(await api.syncFrequentPlayers('profile-a',playerChanges),{names:['Mike']});
 console.log('Frequent-player sync request contract passed.');
+
+// Deleting a game is authenticated, version-checked, and never retried.
+globalThis.fetch=async(url,options)=>{calls.push({url,options});return{ok:true,json:async()=>({deleted:true})}};
+assert.deepEqual(await api.deleteGame(game),{deleted:true});
+assert.equal(calls.at(-1).url,'https://api.example.test/api/games/game/delete');
+assert.equal(calls.at(-1).options.method,'POST');
+assert.deepEqual(JSON.parse(calls.at(-1).options.body),{expectedVersion:7});
+const beforeDelete=calls.length;
+globalThis.fetch=async()=>{calls.push({});return{ok:false,status:409,json:async()=>({error:'Changed before deletion'})}};
+await assert.rejects(()=>api.deleteGame(game),e=>e instanceof ApiError&&e.status===409);
+assert.equal(calls.length,beforeDelete+1);
+globalThis.fetch=async()=>({ok:false,status:404,json:async()=>null});
+await assert.rejects(()=>api.deleteGame(game),/latest API deployment/);
+console.log('Game deletion client: version, authentication, conflicts, no retries and API upgrade guidance passed.');
