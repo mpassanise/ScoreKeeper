@@ -76,3 +76,13 @@ If the step is authentication, test the user-triggered Sign in again path. If it
 Review/merge the PR first. Web publication and an iPhone build/distribution are separate release steps. No API deployment or data migration is required. No native dependency is added and no Expo cloud build is consumed by this development iteration.
 
 Rollback restores prior client code; existing storage formats and API requests are compatible. The new web summary cache/draft can be left unused safely. Never clear legacy game/player storage to roll back.
+
+## iPhone recovery and header UX follow-up (October 16)
+
+A device capture showed games / REQUEST_TIMEOUT / HTTP 408 at 30,003 ms, followed by a successful manual reconnect in about two seconds. This is consistent with an initially slow service but does not establish SQL resume or any other root cause. It is the API I/O budget, not the prior 15-second outer watchdog.
+
+The native refresh API now allows two safe read attempts (one bounded retry after REQUEST_TIMEOUT or DATABASE_WAKING, with the existing one-second delay). Authentication/401 failures do not retry this way, and mutations retain their no-retry behavior. A first timeout stays in nonblocking connecting state while the read retries; a persistent error still exposes Reconnect. This can recover a transient first-load failure without a second tap; it does not remove the first request's latency or guarantee connection. The whole-refresh watchdog still applies. Do not extend retries indefinitely or label cached account games writable offline.
+
+The iPhone sync control moves to a 44-point-wide header button beside the app menu. A small amber dot marks attention; a white native spinner shows work. Opening it displays the existing safe-area-aware Account sync drawer, themed status, last-connected time, Sync now/Reconnect/Sign in to sync, and technical details collapsed by default. The drawer remains dismissible during sync. Main scoring content no longer contains the large status/diagnostic block. No new native dependency is added.
+
+Local verification: API regression tests exercise timeout-then-success, two-attempt exhaustion, non-retry of 401, and cancellation during retry delay. Shared recovery tests, native typecheck and local iOS Expo export run without an EAS build. Physical iPhone light/dark, VoiceOver, Dynamic Type, first launch after idle, offline failure and same-account recovery remain acceptance checks for the next installed build. Existing data and offline-first repository activation are unchanged. This PR is native-only at runtime; no web/API deployment is needed.
