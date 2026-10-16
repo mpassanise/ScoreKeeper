@@ -1,6 +1,6 @@
 # Phase 1, iteration 1: account connection recovery
 
-Date: 2026-10-16. Status: implemented in a review branch; not deployed.
+Date: 2026-10-16. Status: iteration 1 published as web version 52; iteration 2 callback repair and diagnostics in review.
 Tracker: [offline-first rollout](OFFLINE_FIRST_SYNC_PLAN.md).
 Baseline: [data paths and contracts](SYNC_BASELINE_AND_CONTRACTS.md).
 
@@ -25,19 +25,21 @@ Explicit import remains separate. Reconnect may confirm existing identical impor
 
 No refresh-token lifetime, identity provider, client ID or registered redirect URI is changed.
 
-## MSAL callback finding and next increment
+## Phase 1 iteration 2: root callback repair and diagnostics
 
-The installed MSAL browser version is 5.24.0. The app currently handles redirects at the root and has no dedicated v5 bridge. Microsoft documents that iframe fallback after refresh-token expiry needs the bridge; redirect sign-in can still work when the root processes handleRedirectPromise.
+The registered redirect URI stays at the existing root. The root page now detects an OAuth response in a hidden frame and mounts only the callback component. That component calls the installed SDK's broadcastResponseToMainFrame before CloudHome/MSAL initialization can consume or block the response. Top-level redirects still mount CloudHome and use the existing handleRedirectPromise flow. Ordinary embedded app views without an OAuth response are unaffected.
 
-Before activating a new callback:
+This supersedes the proposed dedicated callback route from iteration 1. No new URI or app-registration change is required for this root callback repair. The root response is configured Cache-Control: no-store and Referrer-Policy: no-referrer; production must continue to omit COOP. The SDK remains responsible for state validation, response delivery and URL cleanup. No auth response is decoded, logged or persisted by application callback code.
 
-1. Implement a same-origin bundled bridge route with the installed MSAL package; no external script/CDN.
-2. Serve the callback without COOP and with Cache-Control: no-store.
-3. Verify/register its exact URI in the existing web Entra app registration.
-4. Activate the matching configuration only after the route and registration are available.
-5. Exercise normal redirect, long-idle iframe fallback, blocked cookies and return-to-game on the deployed origin.
+Reconnect tracks authentication, account settings, game list, active game, frequent players, import checks and device reads separately. A timeout records the pending step (prioritizing token acquisition when it is still pending). Failed steps produce a sanitized diagnostic containing only attempt reference, step, elapsed milliseconds, an allowlisted error code, numeric HTTP status, and an optional GUID request reference from the API.
 
-The registration has not been inspected or altered by this iteration. The existing root redirect remains active. This finding is not proof that every timeout comes from the callback.
+Both clients expose expandable Connection details and emit the same diagnostic under the console prefix [Scorekeeper connection]. Raw errors/messages, stacks, tokens, callback URLs, names, emails, game IDs, scores and operation payloads are excluded. Success/reset removes stale details. A stale/cancelled attempt cannot emit another account's diagnostic.
+
+Authentication timeouts remain classified as unavailable rather than proof that sign-in is required. They offer a separate, user-triggered Sign in again action. Typed interaction-required/invalid-grant/401 failures retain the primary Sign in to sync action. No automatic interactive redirect or new score retry is added.
+
+Production evidence received on 2026-10-16: a browser trace shows silent authorization returning to the root with an OAuth response, followed by CloudHome/silent-iframe authorization running again. This supports the callback-loop diagnosis; the generic sandbox warning is not itself the failure. No authorization codes, state values or account identifiers from that trace are retained here. API/database availability still needs confirmation after token handoff succeeds.
+
+Tests exercise the actual installed MSAL 5.24.0 bridge with synthetic hash/query responses, URL cleanup and invalid-state rejection; they also verify that top-level redirects and ordinary embedded views do not select the bridge. Connection tests cover step selection and privacy redaction. These checks do not prove real third-party-cookie behavior or that every production timeout shares this cause.
 
 Reference: [Microsoft redirect bridge setup](https://github.com/AzureAD/microsoft-authentication-library-for-js/blob/dev/lib/msal-browser/docs/redirect-bridge.md).
 
@@ -61,7 +63,13 @@ Before release, manually verify on a browser and physical iPhone:
 7. Sign out during renewal; confirm the old session is not restored.
 8. Check dark/light mode, VoiceOver and narrow screens.
 
-Physical-device and browser interaction QA have not been performed in this environment. Existing controls still wait for foreground cloud scoring requests. Full offline account scoring requires phases 2–4. Automatic retry backoff/jitter and the dedicated MSAL bridge remain future Phase 1 increments; Phase 0 device/timing gates remain open.
+Physical-device and browser interaction QA have not been performed in this environment. Existing controls still wait for foreground cloud scoring requests. Full offline account scoring requires phases 2–4. Automatic retry backoff/jitter and real-session acceptance remain future Phase 1 work; Phase 0 device/timing gates remain open.
+
+## Reproduction details to collect
+
+On the updated web release: refresh, open F12 Console, click Reconnect once, and copy the object prefixed [Scorekeeper connection] or expand Connection details. Include whether the website was opened directly or embedded in ChatGPT. If needed, report just failing API request route (for example /api/account), status and duration from Network. Do not send a HAR export, request Authorization headers, access/refresh tokens, or a callback URL containing code/state.
+
+If the step is authentication, test the user-triggered Sign in again path. If it is games/account with HTTP 503, correlate the GUID request reference using the existing API diagnostics. Player-only failures should be investigated as player sync, even when the game list already loaded.
 
 ## Deployment and rollback
 
