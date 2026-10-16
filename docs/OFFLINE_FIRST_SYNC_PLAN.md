@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-16
-Status: Phase 0 in progress; production behavior remains unchanged.
+Status: Phase 0 safety gates remain open; Phase 1 connection recovery iteration 1 is in review.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -136,7 +136,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 | --- | --- | --- |
 | Plan | Merged | PR #50; no runtime changes. |
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
-| 1 | Not started | Connection UX and MSAL recovery. |
+| 1 | In progress | [Iteration 1: connection status and nonblocking Reconnect](CONNECTION_RECOVERY.md). MSAL bridge activation and device/browser acceptance remain gated. |
 | 2 | Not started | Transactional repository, complete snapshots and migration. |
 | 3 | Not started | Additive replay-safe API. |
 | 4 | Not started | Local-first pilot. |
