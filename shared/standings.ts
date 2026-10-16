@@ -7,5 +7,6 @@ export function gameStandings(game:Pick<Game,'players'|'winner'|'finished'>,tota
  const margin=players.length<2?'':leaders.length>1?`Tied for ${game.finished?'first':'the lead'} · ${leaders.length} players`:`${players[0].player.name} ${game.finished?'won':'leads'} by ${gap.toLocaleString()} ${gap===1?'point':'points'}`;
  const headline=players.length<2?'':leaders.length>1?(game.finished?'Tied for first':'Tied for the lead'):`${players[0].player.name} ${game.finished?'won':'leads'}`;
  const detail=players.length<2?'':leaders.length>1?`${leaders.length} players`:`${gap.toLocaleString()} ${gap===1?'point':'points'} ahead`;
- return {players,margin,headline,detail};
+ const leadLabel=leaders.length>1?(game.finished?'Tied for first':'Tied for the lead'):detail;
+ return {players,margin,headline,detail,leadLabel};
 }
