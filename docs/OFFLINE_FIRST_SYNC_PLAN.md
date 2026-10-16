@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-16
-Status: Phase 0 safety gates remain open; Phase 1 iteration 1 is published on web; iteration 2 callback repair and diagnostics is in review.
+Status: Phase 0/device safety gates remain open. Phase 1 connection recovery and follow-up fixes are published on web. Phase 2 iteration 1 adds an inactive, tested confirmed-snapshot repository.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -83,7 +83,7 @@ Guest/unbound legacy games require explicit account adoption. Do not infer owner
 
 ## Connection and save UX
 
-Use one quiet status row near the Home/scoring header, visible without opening Settings. Use existing theme colors, readable dark mode contrast and accessible text/icons. No page-wide dimming or blocking spinner for background sync. Keep per-game pending/review state available where it differs from the account state.
+On web, use the compact sync control in the application header beside Settings/Account, with connection details and recovery actions in its popover. On iPhone, keep the current nonblocking connection status until native UX acceptance. Use existing theme colors, readable dark mode contrast and accessible text/icons. No page-wide dimming or blocking spinner for background sync. Keep per-game pending/review state available where it differs from the account state.
 
 | Condition | Suggested text | Action and behavior |
 | --- | --- | --- |
@@ -137,7 +137,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 | Plan | Merged | PR #50; no runtime changes. |
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
 | 1 | In progress | [Connection recovery](CONNECTION_RECOVERY.md): iteration 1 published on web; iteration 2 adds the existing-root MSAL bridge and redacted failure details. Real-session/device acceptance remains open. |
-| 2 | Not started | Transactional repository, complete snapshots and migration. |
+| 2 | In progress | Iteration 1: inactive confirmed-snapshot IndexedDB foundation; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
 | 3 | Not started | Additive replay-safe API. |
 | 4 | Not started | Local-first pilot. |
 | 5 | Not started | Cross-device recovery and rollout. |
@@ -151,3 +151,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 - [MSAL browser token lifetimes](https://learn.microsoft.com/en-us/entra/msal/javascript/browser/token-lifetimes)
 
 Recheck documentation against installed versions during implementation. This plan is an incremental architecture change, not a claim that offline account scoring or the new Reconnect flow is already shipped.
+
+### Phase 2 continuation, iteration 1
+
+The confirmed-read repository now has a shared contract and a web IndexedDB adapter. It is not imported or opened by either application. Existing storage keys and write paths remain unchanged. Tests cover complete snapshots, account separation, concurrent connection ordering, transaction rollback, version collisions and invalid/corrupt storage. These emulated tests do not close physical-device, browser quota, eviction, privacy or migration gates. Next: native SQLite adapter spike and identity/privacy decisions, then copy/validate migration and controlled confirmed-read caching. Offline account writes stay disabled until replay-safe API capability and local operation transactions are verified.
