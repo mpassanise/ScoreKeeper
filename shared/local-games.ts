@@ -1,3 +1,4 @@
+import {applyGameEdit} from './game-edit';
 import {validateTargetEnding,targetEndRound,remainingTargetPlayers,finalRoundMessage} from './target-ending';
 import {validateTargetScore,validateScoreLimit} from './score-limit';
 import {ApiError,type Action,type Game,type GameView,type Rules} from "./api";
@@ -50,6 +51,7 @@ export class LocalGames{
  case "select":if(remainingTargetPlayers(g)?.every(p=>p.id!==a.playerId))throw new Error("This player has completed the final round. Score a remaining player.");if(g.finished||!g.players.some(p=>p.id===a.playerId))throw new Error("Select a player in an active game.");g={...g,next:a.playerId!};break;
  case "edit":if(!g.entries.some(e=>e.id===a.entryId))throw new Error("Turn not found.");g=autoEnd({...g,entries:g.entries.map(e=>e.id===a.entryId?{...e,points:a.points!}:e)});break;
  case "undo":if(!g.entries.length)throw new Error("There is no turn to undo.");g=autoEnd({...g,next:g.entries[g.entries.length-1].playerId,entries:g.entries.slice(0,-1),finished:false,finishReason:undefined});break;
+ case "rules":g=applyGameEdit(g,a.rules);break;
  case "finish":g={...g,finished:true,finishReason:"manual"};break;
  case "resume":g=autoEnd({...g,finished:false,finishReason:undefined});if(g.finished)throw new Error("Undo or edit a score to reopen a game that reached its limit.");break;
  }

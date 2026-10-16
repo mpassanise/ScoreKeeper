@@ -103,3 +103,13 @@ assert.equal(calls.length,beforeDelete+1);
 globalThis.fetch=async()=>({ok:false,status:404,json:async()=>null});
 await assert.rejects(()=>api.deleteGame(game),/latest API deployment/);
 console.log('Game deletion client: version, authentication, conflicts, no retries and API upgrade guidance passed.');
+
+const editGame={...game,name:'Custom',winner:'high',finished:false,playStyle:'turns',scoreMode:'add',endCondition:'manual'};
+const editAction={action:'rules',rules:{name:'Renamed',winner:'low',endCondition:'target',targetScore:100,targetEnd:'immediate'}};
+const editRequests=[];
+globalThis.fetch=async(url,options)=>{editRequests.push({url,options});return{ok:true,json:async()=>url.endsWith('/account')?{gameEditingEnabled:true}:{game:{...editGame,name:'Renamed',version:8}}}};
+await api.act(editGame,editAction);assert.equal(editRequests.length,2);assert.equal(editRequests[0].options.method,'GET');assert.deepEqual(JSON.parse(editRequests[1].options.body),{...editAction,expectedVersion:7});assert.equal(editRequests[1].options.headers.Authorization,'Bearer valid-token');
+editRequests.length=0;
+globalThis.fetch=async(url,options)=>{editRequests.push({url,options});return{ok:true,json:async()=>({})}};
+await assert.rejects(()=>api.act(editGame,editAction),/latest API deployment/);assert.equal(editRequests.length,1,'old API receives no unsupported write');
+console.log('Game editing API contract and capability rollout passed.');

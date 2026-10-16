@@ -1,3 +1,4 @@
+import {applyGameEdit} from './game-edit';
 import type {PlayerChange,PlayerProfile} from './frequent-player-sync';
 import {validateTargetEnding} from './target-ending';
 import {validateTargetScore,validateScoreAction,validateScoreLimit} from './score-limit';
@@ -7,8 +8,9 @@ export type Rules={playStyle?:"turns"|"free";scoreMode?:"add"|"total";presetId?:
 export type Game=Rules & {id:string;name:string;players:Player[];winner:"high"|"low";entries:Entry[];next:string;finished:boolean;deviceOnly?:boolean;startedAt?:string|null;endedAt?:string|null;finishReason?:"manual"|"rounds"|"target";version:number;updated:string};
 export type GameView={game:Game;totals:Record<string,number>;winnerIds:string[]};
 export type GameSummary=Pick<Game,"id"|"name"|"players"|"winner"|"finished"|"version"|"updated"|"startedAt"|"endedAt"|"deviceOnly"> & {turnCount:number};
-export type Action={action:"score"|"edit"|"select"|"undo"|"finish"|"resume";points?:number;playerId?:string;entryId?:string};
-export type AccountStatus={profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
+export type GameRuleEdit={name:string;winner:"high"|"low";endCondition:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
+export type Action={rules?:GameRuleEdit;action:"score"|"edit"|"select"|"undo"|"finish"|"resume"|"rules";points?:number;playerId?:string;entryId?:string};
+export type AccountStatus={gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string){super(message)}}
 export class ScorekeeperApi{
@@ -55,6 +57,6 @@ export class ScorekeeperApi{
  get(id:string){return this.request<GameView>(`/games/${encodeURIComponent(id)}`)}
  async deleteGame(game:Pick<Game,'id'|'version'>){try{return await this.request<{deleted:boolean}>(`/games/${encodeURIComponent(game.id)}/delete`,{expectedVersion:game.version})}catch(e){if(e instanceof ApiError&&e.status===404)throw new Error('Game deletion requires the latest API deployment. Your game has been kept.');throw e}}
  create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
- act(game:Game,action:Action){validateScoreAction(game,action);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
+ act(game:Game,action:Action){validateScoreAction(game,action);if(action.action==='rules')applyGameEdit(game,action.rules);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return action.action==='rules'?this.account().then(status=>{if(!status.gameEditingEnabled)throw new Error('Editing account games requires the latest API deployment. Your game has not changed.');return save()}):game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
  import(game:Game){validateTargetScore(game);validateScoreLimit(game);validateTargetEnding(game);const save=()=>this.request<GameView>("/games/import",game);return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
 }

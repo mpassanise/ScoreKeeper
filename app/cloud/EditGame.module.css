@@ -1,0 +1,13 @@
+.dialog{max-height:calc(100dvh - 32px);overflow-y:auto;color:var(--foreground);background:var(--card)}
+.form{display:grid;gap:16px}
+.form fieldset{border:0;margin:0;padding:0;display:grid;gap:16px;min-width:0}
+.field{display:grid;gap:6px}
+.field label{font-size:14px;font-weight:600;margin:0}
+.field input,.field select{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--input);border-radius:10px;background:var(--card);color:var(--foreground);font-size:16px;line-height:22px}
+.help{font-size:14px;line-height:21px;color:var(--muted-foreground);margin:0}
+.error{font-size:14px;line-height:21px;color:var(--destructive);margin:0}
+.actions{display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap}
+.actions button{min-height:44px;padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600}
+.cancel{background:var(--card);color:var(--foreground);border:1px solid var(--border)}
+.save{background:var(--primary);color:var(--primary-foreground);border:1px solid var(--primary)}
+.actions button:disabled{opacity:.5;cursor:default}
