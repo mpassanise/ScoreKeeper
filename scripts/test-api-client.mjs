@@ -68,6 +68,21 @@ try{
  const waitingToken=new ScorekeeperApi('https://api.example.test',async()=>new Promise(()=>{}));
  const tokenFailure=assert.rejects(waitingToken.list(),/Sign-in token refresh timed out/);
  mock.timers.tick(30000);await tokenFailure;assert.equal(requests,1,'token timeout never reaches the API');
+
+ // iPhone recovery retries one timed-out safe read, but never prompts/retries auth failures.
+ let recoveryCalls=0;
+ globalThis.fetch=async()=>{recoveryCalls++;if(recoveryCalls===1)return new Promise(()=>{});return {ok:true,json:async()=>[]}};
+ const recovery=new ScorekeeperApi('https://api.example.test/api',async()=>'valid-token',{readAttempts:2});
+ const recovered=recovery.list();await nextTurn();mock.timers.tick(30000);await nextTurn();mock.timers.tick(1000);await nextTurn();
+ assert.deepEqual(await recovered,[]);assert.equal(recoveryCalls,2);
+ recoveryCalls=0;globalThis.fetch=async()=>{recoveryCalls++;return {ok:false,status:401,json:async()=>({error:'Sign in'})}};
+ await assert.rejects(()=>recovery.list(),e=>e.status===401);assert.equal(recoveryCalls,1);
+ recoveryCalls=0;globalThis.fetch=async()=>{recoveryCalls++;return new Promise(()=>{})};
+ const bounded=recovery.list(),boundedFailure=assert.rejects(bounded,e=>e.code==='REQUEST_TIMEOUT');
+ await nextTurn();mock.timers.tick(30000);await nextTurn();mock.timers.tick(1000);await nextTurn();mock.timers.tick(30000);await boundedFailure;assert.equal(recoveryCalls,2);
+ const cancelRecovery=new AbortController();recoveryCalls=0;
+ const cancelled=new ScorekeeperApi('https://api.example.test/api',async()=>'valid-token',{readAttempts:2,signal:cancelRecovery.signal}).list();
+ const cancellation=assert.rejects(cancelled,e=>e.code==='REQUEST_CANCELLED');await nextTurn();mock.timers.tick(30000);await nextTurn();cancelRecovery.abort();mock.timers.tick(1000);await cancellation;assert.equal(recoveryCalls,1);
 }finally{mock.timers.reset()}
 console.log('Cold-start, bounded retry, token timeout and write-safety checks passed.');
 
