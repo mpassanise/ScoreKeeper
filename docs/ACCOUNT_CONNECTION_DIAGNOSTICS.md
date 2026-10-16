@@ -63,3 +63,9 @@ Reference: https://learn.microsoft.com/en-us/azure/azure-sql/database/serverless
 The API logs request start, authentication metadata retrieval start/completion, token validation, SQL connection opening, and named SQL operations (`account-deletion-status`, `list-games`). The app preserves API error details in both the home notice and Account panel. Error details include sanitized endpoint, HTTP status, attempt, elapsed milliseconds, safe server stage/SQL number and request reference. Tokens and game identifiers are omitted from these details. Exception objects remain in server logs, not in API responses.
 
 Both host and isolated-worker logging explicitly enable Information for the Scorekeeper.Api category. The trace query above returns stage entries. If a start entry has no corresponding completion before timeout, inspect the next dependency and exception for that operation_Id. An old generic error without details can indicate an old mobile binary or API deployment; merge PR #11, redeploy the API and rebuild TestFlight before comparing logs.
+
+## Reconnect deadline correction (October 16)
+
+A production `RECONNECT_TIMEOUT` at 15,004 ms with stage `games` identified the outer recovery watchdog, not an API-generated timeout. The games step was pending; other parallel steps may also have been pending. This does not establish a database or authentication root cause.
+
+The 15-second mark is now a nonblocking “Still connecting” notice. Token acquisition and each HTTP attempt retain their separate 30-second budgets; explicit Reconnect reads use one attempt. A 120-second final watchdog bounds the complete multi-step check and reports all pending stages. Local scoring remains usable throughout. This restores the existing request budgets; it does not resolve or explain server latency. Collect the authenticated Network request status/duration and correlate server telemetry before further infrastructure changes.
