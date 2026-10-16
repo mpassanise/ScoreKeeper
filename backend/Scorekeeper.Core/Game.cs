@@ -3,7 +3,8 @@ public record Player(Guid Id, string Name);
 public record Entry(Guid Id, Guid PlayerId, int Points);
 public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null, DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null, string TargetEnd = "immediate");
 public record GameView(Game Game, Dictionary<Guid,long> Totals, Guid[] WinnerIds);
-public record Command(long ExpectedVersion, string Action, int? Points = null, Guid? PlayerId = null, Guid? EntryId = null);
+public record GameRuleEdit(string Name,string Winner,string EndCondition,int? RoundLimit=null,long? TargetScore=null,string TargetEnd="immediate");
+public record Command(long ExpectedVersion, string Action, int? Points = null, Guid? PlayerId = null, Guid? EntryId = null,GameRuleEdit? Rules = null);
 public static class Scoring
 {
  public static Game Create(Guid id, string name, string[] names, string winner, string endCondition = "manual", int? roundLimit = null, long? targetScore = null, string playStyle = "turns", string scoreMode = "add", string? presetId = null, int? presetVersion = null, string targetEnd = "immediate")
@@ -61,6 +62,7 @@ public static class Scoring
    case "undo":
     if(g.Entries.Length==0)throw new ArgumentException("There is no active turn to undo.");
     changed=g with{Next=g.Entries[^1].PlayerId,Entries=g.Entries[..^1],Finished=false,FinishReason=null};break;
+   case "rules":changed=EditRules(g,c.Rules);break;
    case "finish":changed=g with{Finished=true,FinishReason="manual"};break;
    case "resume":changed=AutoEnd(g with{Finished=false,FinishReason=null});if(changed.Finished)throw new ArgumentException("Undo or edit a score to reopen a game that reached its limit.");break;
    default:throw new ArgumentException("Unknown game action.");
@@ -68,6 +70,19 @@ public static class Scoring
   if(c.Action is "score" or "edit" or "undo")changed=AutoEnd(changed);
   var now=DateTimeOffset.UtcNow;
   changed=changed with{Version=g.Version+1,Updated=now,EndedAt=changed.Finished?(g.Finished?g.EndedAt:now):null};Validate(changed);return changed;
+ }
+ public static Game EditRules(Game g,GameRuleEdit? rules)
+ {
+  if(g.Finished || !string.IsNullOrEmpty(g.PresetId) && g.PresetId!="custom")throw new ArgumentException("Only in-progress custom games can be edited.");
+  if(rules is null)throw new ArgumentException("Choose the game rules to save.");
+  var changed=g with{Name=(rules.Name??"").Trim(),Winner=rules.Winner,EndCondition=rules.EndCondition,RoundLimit=rules.EndCondition=="rounds"?rules.RoundLimit:null,TargetScore=rules.EndCondition=="target"?rules.TargetScore:null,TargetEnd=rules.EndCondition=="target"?rules.TargetEnd:"immediate"};
+  Validate(changed);
+  var endingChanged=changed.EndCondition!=g.EndCondition || changed.EndCondition=="rounds" && changed.RoundLimit!=g.RoundLimit || changed.EndCondition=="target" && (changed.TargetScore!=g.TargetScore || changed.TargetEnd!=g.TargetEnd);
+  if(endingChanged){
+   if(changed.EndCondition=="rounds" && g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=changed.RoundLimit)throw new ArgumentException("Round limit must be greater than the rounds already completed.");
+   if(changed.EndCondition=="target" && (changed.Players.Any(p=>Total(changed,p.Id)>=changed.TargetScore) || changed.TargetEnd=="round" && TargetEndRound(changed) is not null))throw new ArgumentException("Choose a higher score limit so the new ending rule starts ahead of recorded scores.");
+  }
+  return changed;
  }
  public static long Total(Game g,Guid playerId)=>g.ScoreMode=="total"?g.Entries.LastOrDefault(e=>e.PlayerId==playerId)?.Points??0:g.Entries.Where(e=>e.PlayerId==playerId).Sum(e=>(long)e.Points);
  public static Game AutoEnd(Game g)
