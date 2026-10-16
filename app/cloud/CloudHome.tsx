@@ -8,7 +8,7 @@ import {isScoreInput} from "../../shared/score-input";
 import polish from "./WebPolish.module.css";
 import {Trophy,Trash2} from "lucide-react";
 import {useEffect,useRef,useState,useSyncExternalStore} from "react";
-import {createConnectionStatus,isConnectionFailure} from "../../shared/connection-status";
+import {createConnectionStatus,isConnectionFailure,RECONNECT_WATCHDOG_MS} from "../../shared/connection-status";
 import {createGameListCache} from "../../shared/game-list-cache";
 import ConnectionStatus from "./ConnectionStatus";
 import {ScorekeeperApi,ApiError,type Game,type GameView,type GameSummary,type Action} from "../../shared/api";
@@ -48,7 +48,7 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
  const [presetId,setPresetId]=useState<PresetId>("custom"),[settings,setSettings]=useState(defaultSettings);
  const {rules,winner}=setupRules(presetId,settings);
  const locked=useRef(false),identity=useRef<string|null>(null),activity=useRef(0),mounted=useRef(true),restoreGame=useRef<ReconnectDraft|null>(null);
- const [connection]=useState(()=>createConnectionStatus(15000,value=>console.warn('[Scorekeeper connection]',value)));
+ const [connection]=useState(()=>createConnectionStatus(RECONNECT_WATCHDOG_MS,value=>console.warn('[Scorekeeper connection]',value)));
  const connectionState=useSyncExternalStore(connection.subscribe,connection.getSnapshot,connection.getSnapshot);
  const context=useRef({view,creating,points,edit,editingGame,reordering});context.current={view,creating,points,edit,editingGame,reordering};
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;identity.current=null;connection.reset(null)}},[connection]);
