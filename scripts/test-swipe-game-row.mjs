@@ -6,7 +6,7 @@ import path from 'node:path';
 import Module,{createRequire} from 'node:module';
 const output=mkdtempSync(path.join(tmpdir(),'scorekeeper-swipe-')),originalLoad=Module._load;
 try{
- execFileSync(process.execPath,['node_modules/typescript/bin/tsc','mobile/SwipeGameRow.tsx','--jsx','react-jsx','--esModuleInterop','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
+ execFileSync(process.execPath,['mobile/node_modules/typescript/bin/tsc','mobile/SwipeGameRow.tsx','--jsx','react-jsx','--esModuleInterop','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
  writeFileSync(path.join(output,'package.json'),'{"type":"commonjs"}');
  const hooks=[];let index=0,effects=[],handlers,position;
  const react={createElement:()=>null,useRef:value=>{const i=index++;return hooks[i]??(hooks[i]={current:value})},useState:value=>{const i=index++;if(!(i in hooks))hooks[i]=value;return [hooks[i],next=>{hooks[i]=next}]},useMemo:fn=>{const i=index++;return hooks[i]??(hooks[i]=fn())},useEffect:fn=>{effects.push(fn)}};
