@@ -50,5 +50,6 @@ jobs:
         working-directory: mobile
       - run: npm run typecheck
         working-directory: mobile
+      - run: node scripts/test-swipe-game-row.mjs
       - run: npx expo export --platform ios --output-dir /tmp/scorekeeper-mobile
         working-directory: mobile
