@@ -35,7 +35,6 @@ jobs:
       - run: node scripts/test-sqlite-repository.mjs
       - run: node scripts/test-connection-status.mjs
       - run: node scripts/test-msal-callback.mjs
-      - run: node scripts/test-swipe-game-row.mjs
       - run: node scripts/test-player-drag.mjs
       - run: node scripts/test-mobile-buttons.mjs
       - run: pnpm exec tsc --noEmit
@@ -51,5 +50,6 @@ jobs:
         working-directory: mobile
       - run: npm run typecheck
         working-directory: mobile
+      - run: node scripts/test-swipe-game-row.mjs
       - run: npx expo export --platform ios --output-dir /tmp/scorekeeper-mobile
         working-directory: mobile
