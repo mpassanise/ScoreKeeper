@@ -1,3 +1,4 @@
+import {readAccountSnapshot} from '../shared/account-refresh';
 import {setFrequentPlayersAccount,syncFrequentPlayers,clearFrequentPlayersAccount} from './useFrequentPlayers';
 import {createGameListCache} from '../shared/game-list-cache';
 import SwipeGameRow from './SwipeGameRow';
@@ -113,7 +114,7 @@ function Scorekeeper(){
   try{const raw=await SecureStore.getItemAsync(sessionKey);const restored:Session|null=raw?JSON.parse(raw):null;
    const [cached,locals]=await Promise.all([gameListCache.read(restored?.profileId),localApi.list()]);if(!active)return;
    current.current=restored;setSession(restored);setGames(restored?mergeDeviceGames(cached,locals):locals);setGuest(!restored);
-   void setFrequentPlayersAccount(restored?.profileId||null,restored?.profileId?cloudApi:null).catch(()=>{});
+   void setFrequentPlayersAccount(restored?.profileId||null,null,{sync:false}).catch(()=>{});
   }catch{if(active)setError('Could not restore saved data. Please sign in again.')}
   finally{if(active)setReady(true)}
  })();return()=>{active=false}},[]);
@@ -142,8 +143,6 @@ function Scorekeeper(){
  async function importLocal(){await run(async()=>{const status=await cloudApi.account();const supported=(status.scoringRulesVersion||0)>=2;setRulesEnabled(supported);const result=await importPendingGames(localApi,cloudApi,supported,setLocalCount,(status.scoringRulesVersion||0)>=3);await loadCloudGames();setNotice(importSummary(result))})}
  async function login(){await run(async()=>{const result=await promptAsync();if(result.type!=='success')return;if(!discovery||!request?.codeVerifier)throw new Error('Sign-in is not ready.');const t=await AuthSession.exchangeCodeAsync({clientId,code:result.params.code,redirectUri,extraParams:{code_verifier:request.codeVerifier}},discovery);await persist(toSession(t));setGames((await localApi.list()).filter(g=>g.deviceOnly));setView(null);setSettings(defaultSettings);setPresetId("custom");})}
  async function logout(){activityRevision.current++;identityRevision.current++;connection.reset(null);renewing.current=null;const profile=current.current?.profileId;await setFrequentPlayersAccount(null,null);await gameListCache.clear(profile).catch(()=>{});await persist(null);setGames(await localApi.list());setView(null);setGuest(true);if(discovery?.endSessionEndpoint)await WebBrowser.openAuthSessionAsync(discovery.endSessionEndpoint+'?post_logout_redirect_uri='+encodeURIComponent(redirectUri),redirectUri)}
- async function syncPlayers(){const startingIdentity=identityRevision.current;if(!current.current)return;const status=await cloudApi.account();if(!current.current||identityRevision.current!==startingIdentity)throw new Error('Account changed while syncing. Try again.');if(!status.profileId)throw new Error('Frequent-player sync requires the API update. Your local players are safe.');await persist({...current.current,profileId:status.profileId});await setFrequentPlayersAccount(status.profileId,cloudApi);await syncFrequentPlayers()}
- useEffect(()=>{const timer=setInterval(()=>{if(AppState.currentState==='active'&&current.current&&!current.current.profileId)void syncPlayers().catch(()=>{})},30000);return()=>clearInterval(timer)},[discovery]);
  async function refresh(background=false){
   if(locked.current||!current.current)return false;
   const identity=identityRevision.current,revision=activityRevision.current,context=foregroundContext.current;
@@ -153,11 +152,9 @@ function Scorekeeper(){
   try{return await connection.connect(async(isCurrent,signal,step)=>{
    const valid=()=>mounted.current&&isCurrent()&&!!current.current&&identity===identityRevision.current;
    const readApi=new ScorekeeperApi(apiUrl||'http://localhost:7071/api',()=>step('authentication',()=>latestToken.current()),{signal,readAttempts:2});
-   const [saved,status,latest]=await Promise.all([step('games',()=>readApi.list()),step('account',()=>readApi.account()),context.view&&!context.view.game.deviceOnly?step('game',()=>readApi.get(context.view!.game.id)):Promise.resolve(null)]);
-   if(!valid())return;
-   if(status.deletionStatus)throw new Error('Account deletion is pending. Sync is unavailable.');
-   if(current.current?.profileId&&status.profileId!==current.current.profileId)throw new Error('Account identity could not be verified.');
-   if(!valid())return;
+   const snapshot=await readAccountSnapshot({api:readApi,expectedProfileId:current.current?.profileId,gameId:context.view&&!context.view.game.deviceOnly?context.view.game.id:undefined,isCurrent:valid,step});
+   if(!snapshot||!valid())return;
+   const {saved,status,latest}=snapshot;
    setRulesEnabled((status.scoringRulesVersion||0)>=2);
    const locals=await step('device',()=>localApi.list());if(!valid())return;
    if(revision===activityRevision.current){
@@ -168,7 +165,7 @@ function Scorekeeper(){
     if(current.current?.profileId&&current.current.profileId!==status.profileId)throw new Error('Account identity could not be verified.');
     await persist({...current.current!,profileId:status.profileId},identity);
     if(!valid())return;
-    await step('players',()=>setFrequentPlayersAccount(status.profileId!,cloudApi));
+    await step('players',()=>setFrequentPlayersAccount(status.profileId!,cloudApi,{sync:false}));
     if(!valid())return;
     await step('players',()=>syncFrequentPlayers());
    }
