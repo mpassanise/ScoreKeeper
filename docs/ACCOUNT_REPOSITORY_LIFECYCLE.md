@@ -19,7 +19,8 @@ Once verified, calls accept a lease and game ID; callers cannot select another p
 | Successful API verification | Same-profile reads and confirmed saves allowed | No implicit import or adoption |
 | Token/auth/network unavailable | Confirmed saves disabled; verified local reads retained | Existing data preserved |
 | Same-account verified reconnect | Confirmed saves re-enabled | IDs and content unchanged |
-| Unexpected profile / malformed verification | Reject; saves disabled | Previously verified local partition retained |
+| Unexpected profile | Revoke lease and hide local access; require fresh verification | Stored records retained |
+| Malformed verification | Reject; saves disabled | Previously verified local partition retained |
 | Explicit sign-out | Revoke lease and hide account access immediately | No purge; future pending queues must be preserved by their own storage contract |
 | Account switch | New lease; old verification/results rejected | Old account records stay in their original partition |
 | Deletion begins / API reports deletion | Revoke lease; block that profile for this guard's lifetime | No upload or recreation method exists in this guard; retention/purge is separate |
