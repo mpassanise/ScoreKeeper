@@ -19,12 +19,12 @@ try{
   const repository=await open();
   await repository.saveConfirmed('A',[view]);await repository.saveConfirmed('B',[{...view,game:{...view.game,name:'Other account'}}]);
   const access=createAccountAccess(repository);assert.equal(access.state().localReadable,false);
-  const a=access.beginSession('auth-selector-A','A');await rejects(()=>access.readConfirmed(a,'same-game'),'ACCOUNT_UNVERIFIED');await rejects(()=>access.saveConfirmed(a,[view]),'ACCOUNT_UNVERIFIED');
+  let a=access.beginSession('auth-selector-A','A');await rejects(()=>access.readConfirmed(a,'same-game'),'ACCOUNT_UNVERIFIED');await rejects(()=>access.saveConfirmed(a,[view]),'ACCOUNT_UNVERIFIED');
   access.verify(a,status('A'));assert.equal((await access.readConfirmed(a,'same-game')).view.game.name,'Game');
   access.connectionUnavailable(a);assert.equal(access.state().canSync,false);assert.ok(await access.readConfirmed(a,'same-game'),'connection failure retains same-account read access');await rejects(()=>access.saveConfirmed(a,[view]),'SYNC_UNAVAILABLE');
   access.verify(a,status('A'));await access.saveConfirmed(a,[view]);
   await rejects(()=>access.verify(a,{...status('A'),profileId:undefined}),'ACCOUNT_UNVERIFIED');assert.equal(access.state().canSync,false);access.verify(a,status('A'));
-  await rejects(()=>access.verify(a,status('B')),'PROFILE_MISMATCH');assert.equal(access.state().profileId,'A');assert.equal(access.state().canSync,false);access.verify(a,status('A'));
+  await rejects(()=>access.verify(a,status('B')),'PROFILE_MISMATCH');assert.equal(access.state().localReadable,false);assert.equal(access.state().canSync,false);await rejects(()=>access.readConfirmed(a,'same-game'),'STALE_ACCOUNT');a=access.beginSession('auth-selector-A','A');access.verify(a,status('A'));
   const b=access.beginSession('auth-selector-B','B');await rejects(()=>access.readConfirmed(a,'same-game'),'STALE_ACCOUNT');await rejects(()=>access.verify(a,status('A')),'STALE_ACCOUNT');
   access.verify(b,status('B'));assert.equal((await access.readConfirmed(b,'same-game')).view.game.name,'Other account');
   access.signOut();assert.equal(access.state().localReadable,false);await rejects(()=>access.readConfirmed(b,'same-game'),'STALE_ACCOUNT');assert.ok(await repository.readConfirmed('A','same-game'),'sign-out never purges stored records');
