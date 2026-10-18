@@ -26,7 +26,7 @@ export function createAccountAccess(repository:ConfirmedGames){
   verify(lease:AccountLease,status:AccountStatus){
    const current=session(lease);current.canSync=false;const profile=status.profileId;
    if(!profile?.trim())throw new AccountAccessError('ACCOUNT_UNVERIFIED');
-   if((current.expected&&current.expected!==profile)||(current.profileId&&current.profileId!==profile)){current.canSync=false;throw new AccountAccessError('PROFILE_MISMATCH')}
+   if((current.expected&&current.expected!==profile)||(current.profileId&&current.profileId!==profile)){active=null;throw new AccountAccessError('PROFILE_MISMATCH')}
    if(status.deletionStatus||deleting.has(profile)){
     deleting.add(profile);active=null;throw new AccountAccessError('ACCOUNT_DELETING');
    }
