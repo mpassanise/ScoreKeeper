@@ -44,7 +44,7 @@ try{
  await a.saveConfirmed('A',[total]);assert.deepEqual((await a.readConfirmed('A','total')).view,total);
  const completed=game('done');completed.game.finished=true;completed.winnerIds=['p2'];await a.saveConfirmed('A',[completed]);
  // Read corruption is surfaced, never silently converted to an empty account.
- const db=await new Promise((resolve,reject)=>{const r=factory.open('test',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+ const db=await new Promise((resolve,reject)=>{const r=factory.open('test',2);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
  await new Promise((resolve,reject)=>{const tx=db.transaction('confirmedGames','readwrite');tx.objectStore('confirmedGames').put({profileId:'A',gameId:'corrupt',schemaVersion:99});tx.oncomplete=resolve;tx.onabort=reject});
  await rejects(()=>a.readConfirmed('A','corrupt'),'STORAGE_CORRUPT');
  await rejects(()=>a.saveConfirmed('A',[game('corrupt')]),'STORAGE_CORRUPT');
@@ -52,15 +52,15 @@ try{
  a.close();b.close();db.close();
  await rejects(()=>a.saveConfirmed('A',[game()]),'STORAGE_UNAVAILABLE');
  // Unknown future schema is retained, never deleted/downgraded to v1.
- const future=await new Promise(resolve=>{const r=factory.open('future',2);r.onupgradeneeded=()=>r.result.createObjectStore('keep');r.onsuccess=()=>resolve(r.result)});future.close();
+ const future=await new Promise(resolve=>{const r=factory.open('future',3);r.onupgradeneeded=()=>r.result.createObjectStore('keep');r.onsuccess=()=>resolve(r.result)});future.close();
  await rejects(()=>openConfirmedGames(factory,'future'),'STORAGE_UNAVAILABLE');
- const kept=await new Promise(resolve=>{const r=factory.open('future',2);r.onsuccess=()=>resolve(r.result)});assert.ok(kept.objectStoreNames.contains('keep'));kept.close();
+ const kept=await new Promise(resolve=>{const r=factory.open('future',3);r.onsuccess=()=>resolve(r.result)});assert.ok(kept.objectStoreNames.contains('keep'));kept.close();
  // An interrupted first upgrade rolls back schema and can be retried.
  const interrupted=await new Promise(resolve=>{const r=factory.open('interrupted',1);r.onupgradeneeded=()=>{r.result.createObjectStore('partial');r.transaction.abort()};r.onerror=()=>resolve(true)});
  assert.equal(interrupted,true);const recovered=await openConfirmedGames(factory,'interrupted');await recovered.saveConfirmed('A',[game()]);recovered.close();
  // A v1 database with an incompatible store is retained, never recreated.
  const blocker=await new Promise(resolve=>{const r=factory.open('blocked',1);r.onupgradeneeded=()=>r.result.createObjectStore('legacy');r.onsuccess=()=>resolve(r.result)});
- await rejects(()=>openConfirmedGames(factory,'blocked'),'STORAGE_CORRUPT');blocker.close();
+ blocker.close();await rejects(()=>openConfirmedGames(factory,'blocked'),'STORAGE_CORRUPT');
  await rejects(()=>openConfirmedGames({open(){throw new DOMException('denied','SecurityError')}},'denied'),'STORAGE_UNAVAILABLE');
  console.log('Confirmed repository: full snapshots, reopen, account isolation, cross-connection ordering, atomic rollback, quota injection, version collisions, corruption, total scores and future-schema retention passed.');
 }finally{rmSync(output,{recursive:true,force:true})}
