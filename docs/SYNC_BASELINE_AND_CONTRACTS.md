@@ -86,7 +86,7 @@ On acknowledgement failure locally, retain the operation and replay the same ID.
 
 ## ADR-003: identity, sign-out and recovery
 
-Status: proposed behavior, to be verified against current account/privacy screens.
+Status: shared session guard implemented for inactive web/native repositories; durable binding and app/account-screen integration remain open. See [account lifecycle contract](ACCOUNT_REPOSITORY_LIFECYCLE.md).
 
 - Use the server's stable profile identity to partition account data. MSAL account IDs may select a remembered mapping, but email never establishes ownership.
 - An expired token does not sign the local account out or reclassify its data as guest.

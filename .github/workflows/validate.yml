@@ -33,6 +33,7 @@ jobs:
       - run: npm ci --prefix tests/offline --ignore-scripts --no-audit --no-fund
       - run: node scripts/test-confirmed-repository.mjs
       - run: node scripts/test-sqlite-repository.mjs
+      - run: node scripts/test-account-access.mjs
       - run: node scripts/test-connection-status.mjs
       - run: node scripts/test-account-refresh.mjs
       - run: node scripts/test-msal-callback.mjs

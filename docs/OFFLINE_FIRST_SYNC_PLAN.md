@@ -137,7 +137,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 | Plan | Merged | PR #50; no runtime changes. |
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
 | 1 | In progress | [Connection recovery](CONNECTION_RECOVERY.md): iteration 1 published on web; iteration 2 adds the existing-root MSAL bridge and redacted failure details. Real-session/device acceptance remains open. |
-| 2 | In progress | Iterations 1–2: inactive confirmed-snapshot IndexedDB and SQLite foundations; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
+| 2 | In progress | Iterations 1–3: inactive IndexedDB/SQLite foundations and shared account-access guard; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
 | 3 | Not started | Additive replay-safe API. |
 | 4 | Not started | Local-first pilot. |
 | 5 | Not started | Cross-device recovery and rollout. |
@@ -159,3 +159,7 @@ The confirmed-read repository now has a shared contract and a web IndexedDB adap
 ### Phase 2 continuation, iteration 2
 
 Added an inactive SQLite confirmed-snapshot adapter implementing the same account/game contract as IndexedDB, plus file-backed SQLite failure tests. The port was typechecked against expo-sqlite 57.0.4, recommended by the installed Expo 57.0.27 SDK; the native package is not added to mobile dependencies or loaded by the app. The desktop SQLite harness covers pre-commit process termination and committed content after abrupt process exit; it does not establish iOS native bridge/OS durability. CI runs the adapter tests. No storage migration, account cache activation, local scoring queue or API replay capability is enabled. Next: identity/privacy and account lifecycle contract, then recoverable copy/validate migration fixtures and native on-device acceptance before enabling confirmed-read caching. See [native adapter evidence and build impact](SQLITE_REPOSITORY.md).
+
+### Phase 2 continuation, iteration 3
+
+Added a shared account-access guard and guarded web/native repository entry points. The same tests run against IndexedDB and real file-backed SQLite: unverified account rejection, token-expiry read retention, same-profile reconnect, sign-out without purge, account switching, deletion blocking, stale verification and late read/write isolation. The guard is not wired to either live app and makes no migration or queue changes. Session/deletion blocking is currently in-memory; new instances fail closed until server verification. Durable verified binding, signed-out/deletion markers, multi-tab lifecycle propagation and migration journal remain required before activation. See [account lifecycle contract](ACCOUNT_REPOSITORY_LIFECYCLE.md). Next: add transactional lifecycle metadata and recoverable copy/validate/mark migration, then integrate controlled read caching on both platforms with device acceptance.
