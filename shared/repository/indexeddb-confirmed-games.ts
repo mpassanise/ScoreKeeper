@@ -1,4 +1,4 @@
-import {documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
+import {checkDocumentGuard,documentGuards,type DocumentGuard,documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
 import {canonical,checkStored,LocalRepositoryError,requireIdentity,snapshot,type ConfirmedGames,type ConfirmedSnapshot} from './confirmed-games';
 import type {GameView} from '../api';
 
@@ -41,7 +41,12 @@ export async function openConfirmedGames(factory:IDBFactory,name='scorekeeper-re
  return {
   documents:{
    read(key:string){requireIdentity(key);return transaction<DocumentRecord|null>('readonly',(store,done,abort)=>{const request=store.get(key);request.onsuccess=()=>{try{done(request.result===undefined?null:documentRecord(request.result))}catch(error){abort(error)}}},META)},
-   write(key:string,expectedRevision:number,value:unknown){requireIdentity(key);const copy=documentValue(value);return transaction<DocumentRecord>('readwrite',(store,done,abort)=>{const request=store.get(key);request.onsuccess=()=>{try{const next=nextDocument(request.result,expectedRevision,copy);store.put({key,...next});done(next)}catch(error){abort(error)}}},META)}
+   write(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[]){requireIdentity(key);const copy=documentValue(value),checks=documentGuards(guards);return transaction<DocumentRecord>('readwrite',(store,done,abort)=>{
+    let remaining=checks.length+1,existing:unknown;
+    function finish(){if(--remaining!==0)return;const next=nextDocument(existing,expectedRevision,copy);store.put({key,...next});done(next)}
+    const request=store.get(key);request.onsuccess=()=>{try{existing=request.result;finish()}catch(error){abort(error)}};
+    for(const guard of checks){const read=store.get(guard.key);read.onsuccess=()=>{try{checkDocumentGuard(read.result,guard);finish()}catch(error){abort(error)}}}
+   },META)}
   },
   readConfirmed(profileId:string,gameId:string){
    requireIdentity(profileId);requireIdentity(gameId);

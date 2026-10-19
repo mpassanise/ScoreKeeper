@@ -1,4 +1,4 @@
-import {documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
+import {checkDocumentGuard,documentGuards,type DocumentGuard,documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
 import type {GameView} from '../api';
 import {canonical,checkStored,LocalRepositoryError,requireIdentity,snapshot,type ConfirmedGames,type ConfirmedSnapshot} from './confirmed-games';
 
@@ -65,7 +65,7 @@ export async function openSQLiteConfirmedGames(db:SQLiteConnection):Promise<Conf
  return {
   documents:{
    read(key:string){requireIdentity(key);return serialize(async()=>{const row=await db.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);return row?decodeDocument(row):null})},
-   write(key:string,expectedRevision:number,value:unknown){requireIdentity(key);const copy=documentValue(value);return serialize(async()=>{let result:DocumentRecord;await db.withExclusiveTransactionAsync(async tx=>{await durable(tx);const row=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);result=nextDocument(row?decodeDocument(row):undefined,expectedRevision,copy);await tx.runAsync('INSERT INTO repository_metadata (key, revision, document) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, document = excluded.document',key,result.revision,JSON.stringify(result.value))});return result!})}
+   write(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[]){requireIdentity(key);const copy=documentValue(value),checks=documentGuards(guards);return serialize(async()=>{let result:DocumentRecord;await db.withExclusiveTransactionAsync(async tx=>{await durable(tx);for(const guard of checks){const checked=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',guard.key);checkDocumentGuard(checked?decodeDocument(checked):undefined,guard)}const row=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);result=nextDocument(row?decodeDocument(row):undefined,expectedRevision,copy);await tx.runAsync('INSERT INTO repository_metadata (key, revision, document) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, document = excluded.document',key,result.revision,JSON.stringify(result.value))});return result!})}
   },
   readConfirmed(profileId:string,gameId:string){
    requireIdentity(profileId);requireIdentity(gameId);

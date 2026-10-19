@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 2 shadow repository pilot is merged but disabled; device/activation gates remain open. Phase 3 increment 3 adds gated replay-safe creation/import/deletion and imported-entry reservations; all client queues remain disabled.
+Status: Phase 2 shadow repository pilot remains disabled. Phase 3 increment 4 adds an inactive atomic local operation queue/recovery foundation shared by web and iPhone; no live writer cutover or delivery worker is enabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -199,3 +199,11 @@ After merge, install migration 004 and deploy the API with `ScorekeeperGameOpera
 PR #66 is merged. The user confirmed that migration 004 was applied and the API deployed with `ScorekeeperGameOperationsEnabled=false`. Added [replay-safe creation, import and deletion](GAME_LIFECYCLE_OPERATIONS.md), preserving client IDs and terminal receipts without automatic adoption or duplicate-ID fallback. Migration 005 backfills an entry-ID ledger for imported multi-entry history and advances readiness to schema version 2. Legacy saves/undo preserve reservations when the ledger is installed, and account deletion purges reservations with receipts and game data. The existing action fingerprint remains unchanged. Missing-ID deletion reserves a tombstone against delayed imports.
 
 After merge: deploy the API with the backend flag false, confirm all instances use the new deletion cleanup, then apply migration 005. Retain every client pilot/queue flag disabled. No EAS build is required. Follow the lifecycle deployment/rollback guide and authenticated acceptance gates. Next: a separately gated atomic local outbox and acknowledgement recovery for both IndexedDB and iPhone SQLite, with restart/uncertain-commit/account-switch/conflict tests before live writer cutover.
+
+### Phase 3 continuation, increment 4
+
+The user confirmed PR #67 merged, migration 005 applied and API deployed. Added the [atomic local outbox and recovery foundation](LOCAL_GAME_OUTBOX.md) to the shared durable repository. IndexedDB and SQLite store immutable request strings and local projections in one CAS document, guarded by the account lifecycle revision in the same transaction. Pending, uncertain and applied/rejected acknowledgements survive restart; identical retries keep stable IDs. Rejected operations retain and block dependants; acknowledgements never manufacture confirmed snapshots. Existing confirmed and legacy sources are kept.
+
+The inactive layer includes local write/response loss, fake-server acknowledgement loss, concurrent/lifecycle races and abrupt desktop SQLite process-death tests. Existing API/real SQL/web/mobile validation stays required. Physical-browser/iPhone, authenticated HTTP and privacy/activation acceptance are still open. Retained-session recovery is read-only after restart until fresh verification; cold-start offline writes need a deliberate policy decision before activation.
+
+No API/schema deployment or paid Expo build is required for this increment. All backend/client pilot flags remain false. Next: authoritative receipt-to-snapshot reconciliation, explicit conflict review and safe queue compaction, then an inactive transport/reconnect coordinator for both clients before a controlled live-writer pilot. Do not discard/rebase uncertain operations or clear local storage to recover connectivity.
