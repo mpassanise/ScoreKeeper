@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 2 shadow pilot remains disabled. Phase 3 increment 5 adds inactive server-snapshot reconciliation, retained conflict review and queue compaction for web/iPhone; no live writer or delivery worker is enabled.
+Status: Phase 3 increment 6 adds an inactive captured-account delivery/reconnect coordinator for both clients, building on increment 5 reconciliation. Live writers, background delivery and all rollout flags remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -215,3 +215,16 @@ PR #68 is merged, including Copilot's capacity reserve and validation fixes. Add
 Version 1 reads upgrade only in memory; a successful guarded CAS persists version 2. Rollback, lost local acknowledgements, restart, account isolation/revocation, source preservation and deletion-proof tests run on both IndexedDB and desktop SQLite. The generic confirmed-read cache and legacy local sources are not rewritten; the future coordinator must route tracked games through queue reconciliation state. No API/schema deployment or paid Expo build is required. Keep backend and client rollout flags disabled; authenticated HTTP, browser/physical-iPhone, conflict/recovery UX, local erasure/retention and performance acceptance remain open.
 
 Next: an inactive shared delivery/reconnect coordinator with captured-account requests, lifecycle cancellation, bounded retry/backoff, original-ID replay and authoritative post-ack refresh. Finish the remaining UX/data-retention/privacy/device gates before switching live scoring writers or enabling a controlled local-first account pilot. Do not delete archives, reset storage or rebase uncertain work to recover connectivity.
+
+### Phase 3 continuation, increment 6
+
+Added the [captured-account delivery/reconnect coordinator](GAME_DELIVERY_COORDINATOR.md), initially stacked on PR #69 while reconciliation awaits merge. Both durable repository adapters expose the same default-disabled manual worker/HTTP factory. Each pass verifies one captured token/profile, delivers original immutable bytes with bounded retries/backoff and operation/time budgets, commits receipts before dependent work, then refreshes through authoritative queue reconciliation. Same-instance lifecycle changes cancel attached workers; independent-handle revocation is polled while requests are in flight. Late results cannot be adopted by another account. Token/capability/protocol/storage failures pause delivery without legacy-write fallback or fabricated outcomes.
+
+Cross-platform tests cover timeout/response loss, local receipt-commit response loss, post-ack refresh recovery, terminal review/dependants, account switches/deletion, cancelled late responses, bounded passes and raw pinned-token HTTP requests. Existing queue, reconciliation, lifecycle and API suites remain required, alongside SQL/web/mobile CI. No live application calls, background worker, status UI or offline account scoring is activated. No API/schema deployment or paid Expo build is required; keep backend/client flags off and merge the reconciliation dependency before this increment.
+
+Next: controlled application integration behind disabled web/iPhone flags, queue-aware reads, compact reconnect/status UX and explicit conflict/recovery UI. Finish authenticated HTTP, retained-session privacy, archive/local-erasure/performance and real-browser/physical-iPhone acceptance before any writer cutover. Do not switch tokens/accounts mid-pass, clear queues, rebase uncertain changes or fall back to legacy writes to repair connectivity.
+
+
+### PR #70 architecture review corrections
+
+PR #69 is merged. PR #70 targets main with the merged reconciliation fixes retained. Scoped lifecycle cancellation by durable lease identity so stale account callbacks cannot close newer workers. Registered reconnect promises before status callbacks and isolated known per-game reconciliation review failures so independent games can sync while the affected game retains its receipts, projection and candidates. Authentication, account, protocol and storage errors still stop delivery. Added regression coverage on IndexedDB and desktop SQLite. No live writer is activated; all rollout flags remain disabled, with no API/schema deployment or paid Expo build required.
