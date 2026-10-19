@@ -38,7 +38,7 @@ public sealed class TokenVerifier
    if(!result.IsValid){logger.LogWarning("Scorekeeper token validation rejected; FailureType {FailureType}",result.Exception?.GetType().Name??"unknown");if(result.Exception is SecurityTokenSignatureKeyNotFoundException)manager.RequestRefresh();throw new UnauthorizedAccessException();}
    var claims=result.ClaimsIdentity;
    var oid=claims.FindFirst("oid")?.Value;
-   // Deletion markers expire after 30 days; reject access tokens with lifetimes over 24 hours.
+   // Keep the existing access-token lifetime bound; deletion markers are retained independently.
    if(!long.TryParse(claims.FindFirst("iat")?.Value,out var issued)||!long.TryParse(claims.FindFirst("exp")?.Value,out var expires)||expires<=issued||expires-issued>86400||issued>DateTimeOffset.UtcNow.ToUnixTimeSeconds()+60)throw new UnauthorizedAccessException();
    if(claims.FindFirst("tid")?.Value!=tenant || !Guid.TryParse(oid,out _) || !(claims.FindFirst("scp")?.Value.Split(' ')??[]).Contains(scope))throw new UnauthorizedAccessException();
    logger.LogInformation("Scorekeeper token validation passed after {ElapsedMs} ms",elapsed.ElapsedMilliseconds);

@@ -23,5 +23,10 @@
     "name": "ScorekeeperSql",
     "value": "Server=tcp:scorekeeperapp.database.windows.net,1433;Database=free-sql-db-4371450;Authentication=Active Directory Managed Identity;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;",
     "slotSetting": false
+  },
+  {
+    "name": "ScorekeeperGameOperationsEnabled",
+    "value": "false",
+    "slotSetting": false
   }
 ]
