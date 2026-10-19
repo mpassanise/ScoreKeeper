@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 2 shadow repository pilot is merged but disabled; device/activation gates remain open. Phase 3 increment 1 adds an inactive replay-safe action contract and transactional coordinator.
+Status: Phase 2 shadow repository pilot is merged but disabled; device/activation gates remain open. Phase 3 increment 2 adds gated SQL receipts and an authenticated action endpoint; all client queues remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -137,8 +137,8 @@ Proposed performance targets to validate on representative devices: cached usabl
 | Plan | Merged | PR #50; no runtime changes. |
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
 | 1 | In progress | [Connection recovery](CONNECTION_RECOVERY.md): iteration 1 published on web; iteration 2 adds the existing-root MSAL bridge and redacted failure details. Real-session/device acceptance remains open. |
-| 2 | In progress | Iterations 1–4: inactive storage, account access, durable lifecycle metadata and migration staging; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
-| 3 | In progress | Increment 1: [action operation contract and transactional receipt coordinator](REPLAY_SAFE_GAME_OPERATIONS.md). SQL adapter/routes, creation/import/deletion protocols and capability activation remain open. |
+| 2 | In progress | Iterations 1–5 merged: durable storage, lifecycle metadata, staging and disabled shadow-cache wiring. Browser/physical-iPhone acceptance and controlled cutover remain open; see [pilot gates](CONFIRMED_CACHE_PILOT.md). |
+| 3 | In progress | Increments 1–2: action contract plus [gated SQL receipts and endpoint](SQL_GAME_OPERATION_DEPLOYMENT.md). Authenticated deployment acceptance, creation/import/deletion protocols and client queue activation remain open. |
 | 4 | Not started | Local-first pilot. |
 | 5 | Not started | Cross-device recovery and rollout. |
 | 6 | Not started | Performance and scale. |
@@ -185,3 +185,11 @@ PR #64 and Copilot follow-ups are merged. Reviewed the account-action barriers, 
 Started Phase 3 development without advancing Phase 2 acceptance gates or activating any offline account writes. Added a strict v1 action-operation envelope shared by web/iPhone and C#, a stable-entry/commit-time scoring seam, and an inactive transactional receipt coordinator. It fingerprints requests before async work, checks owner/deletion scope, looks up receipts before version checks, reserves historical entry IDs, and returns terminal acknowledgements without game snapshots. The transaction fixture covers concurrent replay, receipt-write rollback and lost acknowledgements; it is not SQL integration evidence. See [protocol, safety boundaries and deployment order](REPLAY_SAFE_GAME_OPERATIONS.md).
 
 Next: real SQL transaction/receipt adapter, additive schema and action endpoint with capability gating; resolve permanent minimal account deletion barriers and receipt retention before activation. Extend stable protocols to creation/import/deletion, then deploy compatible API/schema before enabling any dependent web/iPhone queue. Physical-device and browser pilot acceptance remain open. No routes/capabilities/queues or pilot flags are enabled in this increment.
+
+### Phase 3 continuation, increment 2
+
+PR #65 merged, including stricter numeric parsing and related regression checks. Added migration 004, the owner-locked SQL receipt adapter and authenticated `POST /game-operations`. Account capability discovery requires the exact backend flag plus a ready schema; no client dispatch, queue or offline account scoring is enabled. The SQL transaction commits game state and its applied/rejected receipt together. New/legacy writers share the owner lock and expected-version checks. Completed account deletion markers no longer expire; account completion removes receipts while retaining the minimal hashed block. Privacy/retention wording is updated to match.
+
+A dedicated CI job uses disposable real SQL Server and the application database user for repeated/concurrent requests, lost acknowledgements, injected receipt failures, legacy writer contention, migration/schema gates, deletion and retained entry IDs. API/core checks and existing web/mobile CI remain required. Real SQL tests do not close production Azure/Entra, browser or physical-iPhone acceptance gates.
+
+After merge, install migration 004 and deploy the API with `ScorekeeperGameOperationsEnabled=false`. No EAS build is required for this backend increment. Keep the capability off in production pending authenticated smoke/pilot acceptance, and do not enable queues. See [deployment sequence, rollback constraints and remaining work](SQL_GAME_OPERATION_DEPLOYMENT.md). Next: stable creation/import/deletion protocols, then a separately gated atomic local outbox and acknowledgement recovery for both clients.

@@ -12,6 +12,26 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet build backend/Scorekeeper.Api/Scorekeeper.Api.csproj -c Release
       - run: dotnet run --project backend/Scorekeeper.Tests/Scorekeeper.Tests.csproj -c Release
+  sql-operations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      sql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: 'Y'
+          MSSQL_SA_PASSWORD: 'Scorekeeper-CI-Only!2026'
+        ports:
+          - 1433:1433
+        options: --memory=3g
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet run --project backend/Scorekeeper.SqlTests/Scorekeeper.SqlTests.csproj -c Release
+        env:
+          SCOREKEEPER_SQL_TEST_CONNECTION: 'Server=localhost,1433;User ID=sa;Password=Scorekeeper-CI-Only!2026;Encrypt=True;TrustServerCertificate=True;Connect Timeout=2'
   web:
     runs-on: ubuntu-latest
     steps:

@@ -7,10 +7,10 @@ using Microsoft.Data.SqlClient;
 using Scorekeeper.Core;
 namespace Scorekeeper.Api;
 public sealed class AccountDeletingException : Exception;
-public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
+public sealed partial class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
 {
  public static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web);
- readonly string connectionString=TokenVerifier.Required("ScorekeeperSql");
+ readonly string connectionString=Environment.GetEnvironmentVariable("ScorekeeperSql") is {Length:>0} value?value:throw new InvalidOperationException("Missing setting ScorekeeperSql.");
  public static string OwnerKey(string owner)=>Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(owner)));
  async Task<SqlConnection> Connect(){
   var elapsed=Stopwatch.StartNew();var c=new SqlConnection(connectionString);
@@ -20,7 +20,7 @@ public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
  public Task<string?> DeletionState(string owner)=>Measure("account-deletion-status",async()=>
  {
   await using var c=await Connect();await using var q=c.CreateCommand();
-  q.CommandText="DELETE TOP (100) FROM dbo.AccountDeletions WHERE CompletedAt < DATEADD(day,-30,SYSDATETIMEOFFSET()); SELECT Status FROM dbo.AccountDeletions WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));
+  q.CommandText="SELECT Status FROM dbo.AccountDeletions WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));
   return await q.ExecuteScalarAsync() as string;
  });
  static async Task LockOwner(SqlConnection c,SqlTransaction tx,string owner)
@@ -40,7 +40,7 @@ public sealed class GameStore(ILogger<GameStore> logger) : IAccountDeletionStore
  public async Task CompleteDeletion(string owner)
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);
-  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="DELETE FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner; DELETE FROM dbo.FrequentPlayers WHERE OwnerId=@owner; DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
+  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="IF OBJECT_ID('dbo.GameOperationReceipts','U') IS NOT NULL EXEC sys.sp_executesql N'DELETE FROM dbo.GameOperationReceipts WHERE OwnerKey=@key',N'@key char(64)',@key; DELETE FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner; DELETE FROM dbo.FrequentPlayers WHERE OwnerId=@owner; DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
  }
  public async Task<Game?> Get(string owner,Guid id)
  {

@@ -130,7 +130,7 @@ UPDATE dbo.AccountDeletions SET Status='completed', OwnerId=NULL,
 COMMIT;
 ```
 
-Completed markers keep only a one-way account hash and timestamps; raw owner IDs are removed. Completed markers older than 30 days are cleared during subsequent API use. Tokens issued with a lifetime over 24 hours are rejected, so old tokens expire before marker cleanup. Microsoft Entra's deleted identities may remain recoverable for 30 days, and SQL backup copies expire according to your configured retention. The privacy page discloses these limits. Older browser-local games are separate and are removed by clearing website data.
+Completed markers keep only a one-way account hash and timestamps; raw owner IDs are removed. Completed markers do not expire automatically: delayed offline operations must not recreate an explicitly deleted account. Tokens issued with a lifetime over 24 hours are still rejected independently. With migration 004 installed, completion also removes operation receipts; the minimal hashed deletion block remains. Microsoft Entra's deleted identities may remain recoverable for 30 days, and SQL backup copies expire according to your configured retention. The privacy page discloses these limits. Older browser-local games are separate and are removed by clearing website data.
 
 ## App Store links
 

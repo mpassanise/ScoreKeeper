@@ -1,6 +1,6 @@
 # Replay-safe game operation contract — Phase 3, increment 1
 
-Date: 2026-10-19. Status: inactive foundation; SQL adapter, HTTP endpoint and capability discovery are not implemented. Web and iPhone continue their existing online writers. Do not enable an account outbox from this PR.
+Date: 2026-10-19. Status: the action contract is implemented with a separately gated SQL/HTTP adapter; see [increment 2 deployment and acceptance](SQL_GAME_OPERATION_DEPLOYMENT.md). Web and iPhone continue their existing online writers. No client queue is enabled.
 
 ## Operation identity and command semantics
 
@@ -29,7 +29,7 @@ Receipts must be retained for the supported lifetime of the account, with no tim
 
 ## Transaction boundary and SQL integration requirements
 
-`GameOperationService` depends on `IGameOperationStore`. The port is deliberately not registered with the API. An implementation must:
+`GameOperationService` depends on `IGameOperationStore`. Increment 1 left this port inactive; increment 2 registers the gated SQL adapter. Every implementation must:
 
 1. Open one SQL transaction and acquire the same authenticated owner lock used by legacy writes and account deletion. Read/write game rows, deletion markers, receipts and entry-ID reservations in that transaction.
 2. Check durable account deletion blocking **before** returning an old receipt.
@@ -38,7 +38,7 @@ Receipts must be retained for the supported lifetime of the account, with no tim
 5. Write the game with a version predicate and the receipt together, including terminal rejection receipts. A write/commit failure must roll everything back. An uncertain commit is recovered by replaying the original operation ID.
 6. Return only after commit. Preserve minimal tombstones; absence from the capped list is never a deletion signal. Do not advertise support until actual SQL transaction/replay and old-client compatibility tests pass.
 
-The in-memory transactional fixture exercises coordinator behavior, not Azure SQL durability/locking. Existing `GameStore` has no operation receipts. Its completed-account deletion record expiry is also **not** an acceptable long-term replay barrier; resolve durable minimal account deletion markers and receipt cleanup together before capability activation. Never deploy a capability flag based on interface tests alone.
+The in-memory transactional fixture exercises coordinator behavior, not Azure SQL durability/locking. Increment 1 did not include SQL receipt storage. Increment 2 supplies it and removes automatic completed-account marker expiry; preserve those permanent minimal blocks and receipt cleanup semantics during rollout. Never deploy a capability flag based on interface tests alone.
 
 ## Evidence
 
@@ -53,6 +53,10 @@ node scripts/test-repository-pilot.mjs
 
 ## Deployment and next increment
 
-No API/schema deployment is required to activate anything in this PR: there is no active operation route or capability. Publish the merged PR #64 web fixes with its pilot flags still disabled. An iPhone build can wait for device-pilot acceptance; SQLite still requires a binary that includes its native module. No EAS cloud build is requested here.
+Increment 1 required no API/schema deployment. Increment 2 adds a gated operation route and requires migration 004 plus API deployment before deliberate backend activation. Keep all client pilot/queue flags disabled. An iPhone build can wait for device-pilot acceptance; SQLite still requires a binary that includes its native module. No EAS cloud build is requested here.
 
 Next implement the SQL receipt adapter, additive schema and authenticated action endpoint with missing-schema/capability gating, integration tests, persistent deletion barriers and receipt retention. Then add stable creation/import/deletion protocols and deploy the additive API/schema before any dependent client queue. Continue browser/iPhone Phase 2 acceptance independently. Only after those gates should an atomic local outbox and local-first account scoring pilot begin.
+
+## Increment 2 implementation
+
+The gated SQL adapter and authenticated endpoint are now implemented; see [SQL deployment and acceptance](SQL_GAME_OPERATION_DEPLOYMENT.md). The earlier inactive-interface notes above describe increment 1. Migration 004 and the backend flag gate current capability; no client queue is enabled. Real SQL integration CI is required before activation. Completed account deletion markers no longer expire in the new API, and receipt cleanup occurs only as part of explicit account deletion.
