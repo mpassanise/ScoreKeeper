@@ -40,7 +40,7 @@ public sealed partial class GameStore(ILogger<GameStore> logger) : IAccountDelet
  public async Task CompleteDeletion(string owner)
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);
-  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="IF OBJECT_ID('dbo.GameOperationReceipts','U') IS NOT NULL EXEC sys.sp_executesql N'DELETE FROM dbo.GameOperationReceipts WHERE OwnerKey=@key',N'@key char(64)',@key; DELETE FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner; DELETE FROM dbo.FrequentPlayers WHERE OwnerId=@owner; DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
+  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="IF OBJECT_ID('dbo.GameEntryReservations','U') IS NOT NULL EXEC sys.sp_executesql N'DELETE FROM dbo.GameEntryReservations WHERE OwnerKey=@key',N'@key char(64)',@key; IF OBJECT_ID('dbo.GameOperationReceipts','U') IS NOT NULL EXEC sys.sp_executesql N'DELETE FROM dbo.GameOperationReceipts WHERE OwnerKey=@key',N'@key char(64)',@key; DELETE FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner; DELETE FROM dbo.FrequentPlayers WHERE OwnerId=@owner; DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
  }
  public async Task<Game?> Get(string owner,Guid id)
  {
@@ -58,20 +58,22 @@ public sealed partial class GameStore(ILogger<GameStore> logger) : IAccountDelet
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
   await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="INSERT INTO dbo.Games(OwnerId,GameId,Version,Updated,State) VALUES(@owner,@id,@version,@updated,@state)";Parameters(q,owner,g);
-  try{await q.ExecuteNonQueryAsync();await tx.CommitAsync();return true;}catch(SqlException e)when(e.Number is 2601 or 2627){return false;}
+  try{await q.ExecuteNonQueryAsync();await ReserveEntries(c,tx,owner,g.Id);await tx.CommitAsync();return true;}catch(SqlException e)when(e.Number is 2601 or 2627){return false;}
  }
  // Retain only a deletion marker. The primary key prevents an old device's
  // import from recreating this game; names, players and scores are removed.
  public async Task<bool> DeleteGame(string owner,Guid id,long expected)
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
+  await ReserveEntries(c,tx,owner,id);
   await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="UPDATE dbo.Games SET State=@state,Version=Version+1,Updated=SYSDATETIMEOFFSET() WHERE OwnerId=@owner AND GameId=@id AND Version=@expected AND COALESCE(JSON_VALUE(State,'$.deleted'),'false')<>'true' AND JSON_VALUE(State,'$.finished')='false'";
   q.Parameters.AddWithValue("@owner",owner);q.Parameters.AddWithValue("@id",id);q.Parameters.AddWithValue("@expected",expected);q.Parameters.AddWithValue("@state",JsonSerializer.Serialize(new{deleted=true},Json));var changed=await q.ExecuteNonQueryAsync()==1;await tx.CommitAsync();return changed;
  }
  public async Task<bool> Replace(string owner,Game g,long expected)
  {
   await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await Guard(c,tx,owner);
-  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="UPDATE dbo.Games SET State=@state,Version=@version,Updated=@updated WHERE OwnerId=@owner AND GameId=@id AND Version=@expected";Parameters(q,owner,g);q.Parameters.AddWithValue("@expected",expected);var changed=await q.ExecuteNonQueryAsync()==1;await tx.CommitAsync();return changed;
+  await ReserveEntries(c,tx,owner,g.Id);
+  await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="UPDATE dbo.Games SET State=@state,Version=@version,Updated=@updated WHERE OwnerId=@owner AND GameId=@id AND Version=@expected";Parameters(q,owner,g);q.Parameters.AddWithValue("@expected",expected);var changed=await q.ExecuteNonQueryAsync()==1;await ReserveEntries(c,tx,owner,g.Id);await tx.CommitAsync();return changed;
  }
  public async Task<string[]> SyncPlayers(string owner,FrequentPlayerChange[] changes)
  {
@@ -93,6 +95,20 @@ public sealed partial class GameStore(ILogger<GameStore> logger) : IAccountDelet
   logger.LogInformation("Scorekeeper SQL operation {SqlOperation} started",operation);
   try{var result=await work();logger.LogInformation("Scorekeeper SQL operation {SqlOperation} succeeded after {ElapsedMs} ms",operation,elapsed.ElapsedMilliseconds);return result;}
   catch(Exception e){logger.LogError(e,"Scorekeeper SQL operation {SqlOperation} failed after {ElapsedMs} ms; SqlNumber {SqlNumber}",operation,elapsed.ElapsedMilliseconds,(e as SqlException)?.Number);throw;}
+ }
+ // Conditional dynamic SQL preserves legacy deployment compatibility before migration 005.
+ static async Task ReserveEntries(SqlConnection c,SqlTransaction tx,string owner,Guid gameId)
+ {
+  await using var q=c.CreateCommand();q.Transaction=tx;
+  q.CommandText="""
+   IF OBJECT_ID('dbo.GameEntryReservations','U') IS NOT NULL
+   EXEC sys.sp_executesql N'INSERT dbo.GameEntryReservations(OwnerKey,GameId,EntryId)
+    SELECT DISTINCT @key,@id,e.EntryId FROM dbo.Games g CROSS APPLY OPENJSON(g.State,''$.entries'') WITH(EntryId uniqueidentifier ''$.id'') e
+    WHERE g.OwnerId=@owner AND g.GameId=@id AND e.EntryId IS NOT NULL
+    AND NOT EXISTS(SELECT 1 FROM dbo.GameEntryReservations r WHERE r.OwnerKey=@key AND r.GameId=@id AND r.EntryId=e.EntryId)',
+    N'@key char(64),@owner nvarchar(100),@id uniqueidentifier',@key,@owner,@id;
+   """;
+  q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);q.Parameters.AddWithValue("@id",gameId);await q.ExecuteNonQueryAsync();
  }
  static void Parameters(SqlCommand q,string owner,Game g){q.Parameters.AddWithValue("@owner",owner);q.Parameters.AddWithValue("@id",g.Id);q.Parameters.AddWithValue("@version",g.Version);q.Parameters.AddWithValue("@updated",g.Updated);q.Parameters.AddWithValue("@state",JsonSerializer.Serialize(g,Json));}
 }

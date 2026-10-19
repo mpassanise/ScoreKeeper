@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 2 shadow repository pilot is merged but disabled; device/activation gates remain open. Phase 3 increment 2 adds gated SQL receipts and an authenticated action endpoint; all client queues remain disabled.
+Status: Phase 2 shadow repository pilot is merged but disabled; device/activation gates remain open. Phase 3 increment 3 adds gated replay-safe creation/import/deletion and imported-entry reservations; all client queues remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -138,7 +138,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
 | 1 | In progress | [Connection recovery](CONNECTION_RECOVERY.md): iteration 1 published on web; iteration 2 adds the existing-root MSAL bridge and redacted failure details. Real-session/device acceptance remains open. |
 | 2 | In progress | Iterations 1–5 merged: durable storage, lifecycle metadata, staging and disabled shadow-cache wiring. Browser/physical-iPhone acceptance and controlled cutover remain open; see [pilot gates](CONFIRMED_CACHE_PILOT.md). |
-| 3 | In progress | Increments 1–2: action contract plus [gated SQL receipts and endpoint](SQL_GAME_OPERATION_DEPLOYMENT.md). Authenticated deployment acceptance, creation/import/deletion protocols and client queue activation remain open. |
+| 3 | In progress | Increments 1–2: action contract plus [gated SQL receipts and endpoint](SQL_GAME_OPERATION_DEPLOYMENT.md). Lifecycle protocols are implemented in increment 3; authenticated deployment acceptance and client queue activation remain open. |
 | 4 | Not started | Local-first pilot. |
 | 5 | Not started | Cross-device recovery and rollout. |
 | 6 | Not started | Performance and scale. |
@@ -193,3 +193,9 @@ PR #65 merged, including stricter numeric parsing and related regression checks.
 A dedicated CI job uses disposable real SQL Server and the application database user for repeated/concurrent requests, lost acknowledgements, injected receipt failures, legacy writer contention, migration/schema gates, deletion and retained entry IDs. API/core checks and existing web/mobile CI remain required. Real SQL tests do not close production Azure/Entra, browser or physical-iPhone acceptance gates.
 
 After merge, install migration 004 and deploy the API with `ScorekeeperGameOperationsEnabled=false`. No EAS build is required for this backend increment. Keep the capability off in production pending authenticated smoke/pilot acceptance, and do not enable queues. See [deployment sequence, rollback constraints and remaining work](SQL_GAME_OPERATION_DEPLOYMENT.md). Next: stable creation/import/deletion protocols, then a separately gated atomic local outbox and acknowledgement recovery for both clients.
+
+### Phase 3 continuation, increment 3
+
+PR #66 is merged. The user confirmed that migration 004 was applied and the API deployed with `ScorekeeperGameOperationsEnabled=false`. Added [replay-safe creation, import and deletion](GAME_LIFECYCLE_OPERATIONS.md), preserving client IDs and terminal receipts without automatic adoption or duplicate-ID fallback. Migration 005 backfills an entry-ID ledger for imported multi-entry history and advances readiness to schema version 2. Legacy saves/undo preserve reservations when the ledger is installed, and account deletion purges reservations with receipts and game data. The existing action fingerprint remains unchanged. Missing-ID deletion reserves a tombstone against delayed imports.
+
+After merge: apply migration 005 and deploy the API, retaining the backend flag false and every client pilot/queue flag disabled. No EAS build is required. Follow the lifecycle deployment/rollback guide and authenticated acceptance gates. Next: a separately gated atomic local outbox and acknowledgement recovery for both IndexedDB and iPhone SQLite, with restart/uncertain-commit/account-switch/conflict tests before live writer cutover.

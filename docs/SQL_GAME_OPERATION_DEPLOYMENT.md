@@ -46,3 +46,7 @@ This is real SQL Server transaction evidence, not a production Azure SQL or Entr
 6. Next implement stable creation/import/deletion protocols and the client-side atomic outbox/acknowledgement recovery under their release gates. Deploy compatible API/schema before admitting those clients.
 
 Rollback before queue activation: set the flag false and retain both new tables and all existing data. Disabling removes the advertised capability and rejects new operation calls while legacy clients keep working. After accepting queued clients, do not roll back to an API that expires account deletion markers or removes replay support. Preserve a compatible recovery path for any unknown/pending outcomes. Never clear local storage or delete receipts to repair a connection problem.
+
+## Increment 3 supersedes the action-only readiness gate
+
+See [lifecycle protocol and migration 005 deployment](GAME_LIFECYCLE_OPERATIONS.md). The latest API requires schema version 2, adds explicit supported kinds, and preserves the v1 action fingerprint/receipt contract. Migration 004 remains a prerequisite and must not be rerun after 005. Keep the flag false through the upgrade. No web/iPhone queue is activated.

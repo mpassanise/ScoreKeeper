@@ -7,8 +7,13 @@ import {execFileSync} from 'node:child_process';
 const fixture=JSON.parse(readFileSync('tests/fixtures/game-operation-v1.json','utf8'));
 const root=mkdtempSync(path.join(tmpdir(),'scorekeeper-operation-contract-'));
 try{
- const source=`import type {GameActionOperation} from ${JSON.stringify(path.resolve('shared/game-operation-contract'))};
+ const source=`import type {GameActionOperation,GameLifecycleOperation} from ${JSON.stringify(path.resolve('shared/game-operation-contract'))};
  const operation=${JSON.stringify(fixture.operation)} satisfies GameActionOperation;
+ const deletion={protocolVersion:1,kind:'delete',operationId:'op',gameId:'game',expectedVersion:2} satisfies GameLifecycleOperation;
+ // @ts-expect-error Creation requires a complete game.
+ const incomplete:GameLifecycleOperation={protocolVersion:1,kind:'create',operationId:'op',gameId:'game',expectedVersion:0};
+ // @ts-expect-error Imports cannot overwrite an existing server version.
+ const overwrite:GameLifecycleOperation={protocolVersion:1,kind:'import',operationId:'op',gameId:'game',expectedVersion:2,game:{} as never};
  // @ts-expect-error A queued score requires a stable entry ID.
  const invalid:GameActionOperation={...operation,command:{action:'score',expectedVersion:1,points:0,playerId:'p'}};
  // @ts-expect-error Undo targets a specific score entry.
