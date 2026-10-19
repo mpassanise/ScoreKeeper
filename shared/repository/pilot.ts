@@ -13,11 +13,12 @@ export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<
  let tail:Promise<unknown>=Promise.resolve();
  const scopes=new WeakSet<object>();
  const stale=()=>new AccountAccessError('STALE_ACCOUNT');
+ function invalidateScope(scope:ReadScope){
+  if(scopes.has(scope)&&selector===scope.selector&&generation===scope.generation&&!closed){generation++;lease=undefined;proof=undefined;options.onInvalidated()}
+ }
  function invalidate(scope:ReadScope,error:unknown){
   const code=(error as {code?:string})?.code;
-  if((code==='STALE_ACCOUNT'||code==='PROFILE_MISMATCH'||code==='ACCOUNT_DELETING')&&selector===scope.selector&&generation===scope.generation&&!closed){
-   generation++;lease=undefined;proof=undefined;options.onInvalidated();
-  }
+  if(code==='STALE_ACCOUNT'||code==='PROFILE_MISMATCH'||code==='ACCOUNT_DELETING')invalidateScope(scope);
  }
  function serial<T>(work:()=>Promise<T>):Promise<T>{const result=tail.then(work);tail=result.catch(()=>{});return result}
  async function repository(){if(closed||!options.enabled)throw stale();return opening??=(options.open().then(async raw=>{if(closed){await raw.close();throw stale()}return {raw,access:createDurableAccountRepository(raw)}}).catch(e=>{opening=undefined;throw e}))}
@@ -25,7 +26,7 @@ export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<
  function capture():ReadScope|null{if(!options.enabled||closed||!selector)return null;const scope=Object.freeze({selector,generation});scopes.add(scope);return scope}
  function select(next:string|null){if(!options.enabled||closed||selector===next)return;generation++;selector=next;lease=undefined;proof=undefined;deletionSelector=null}
  return {
-  enabled:options.enabled,select,capture,
+  enabled:options.enabled,select,capture,invalidate(scope:ReadScope|null){if(scope)invalidateScope(scope)},
   prepare(next:string){select(next);generation++;const scope=capture();return serial(async()=>{if(!options.enabled)return null;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);proof=(await access.restore(next))??undefined;valid(scope);proof=proof??await access.beginVerification(next);valid(scope);lease=proof.kind==='account'?proof:undefined;return scope})},
   verify(scope:ReadScope|null,status:AccountStatus){return serial(async()=>{if(!options.enabled)return;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);
    if(!proof)throw new AccountAccessError('ACCOUNT_UNVERIFIED');valid(scope);

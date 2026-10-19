@@ -166,6 +166,7 @@ function Scorekeeper(){
    const selectedGame=context.view&&!context.view.game.deviceOnly?context.view.game.id:(!context.view&&recovery&&recovery.profileId===current.current?.profileId?recovery.gameId:undefined);
    const snapshot=await readAccountSnapshot({api:readApi,expectedProfileId:current.current?.profileId,gameId:selectedGame,isCurrent:valid,step,onAccountStatus:async status=>{
     if(!pilot.ref.current||!status.profileId)return;
+    if(current.current?.profileId&&status.profileId!==current.current.profileId){pilot.ref.current.invalidate(pilotScope??pilot.ref.current.capture());return}
     const scope=pilotScope??(!current.current?.profileId?await preparePilot('native-profile:'+status.profileId):null);
     if(!valid())return;
     if(scope){pilotScope=scope;try{await pilot.ref.current.verify(scope,status);pilotVerified=true}catch{setNotice('Could not prepare device storage. Account games remain online-only.');}}
