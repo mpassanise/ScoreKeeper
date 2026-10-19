@@ -18,7 +18,7 @@ try{
  const read=readAccountSnapshot({api,expectedProfileId:'A',gameId:'selected',isCurrent:()=>true,step});await turn();assert.deepEqual(events,['account']);
  pending.resolve({profileId:'A',deletionStatus:null});const result=await read;assert.deepEqual(events,['account','games','game:selected']);assert.equal(result.status.profileId,'A');
  for(const status of [{profileId:'B',deletionStatus:null},{profileId:'A',deletionStatus:'pending'}]){
-  events.length=0;await assert.rejects(()=>readAccountSnapshot({api:{...api,account:async()=>status},expectedProfileId:'A',isCurrent:()=>true,step}));assert.deepEqual(events,[],'identity/deletion failure never starts game reads');
+  events.length=0;let observed=null;await assert.rejects(()=>readAccountSnapshot({api:{...api,account:async()=>status},expectedProfileId:'A',isCurrent:()=>true,step,onAccountStatus:async value=>{observed=value}}));assert.deepEqual(events,[],'identity/deletion failure never starts game reads');assert.equal(observed,status,'pilot receives lifecycle denials before refresh aborts');
  }
  let valid=true;const stale=deferred();events.length=0;
  const switching=readAccountSnapshot({api:{...api,account:()=>stale.promise},expectedProfileId:'A',isCurrent:()=>valid,step});valid=false;stale.resolve({profileId:'A',deletionStatus:null});assert.equal(await switching,null);assert.deepEqual(events,[]);

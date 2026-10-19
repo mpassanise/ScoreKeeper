@@ -35,6 +35,7 @@ jobs:
       - run: node scripts/test-sqlite-repository.mjs
       - run: node scripts/test-account-access.mjs
       - run: node scripts/test-durable-repository.mjs
+      - run: node scripts/test-repository-pilot.mjs
       - run: node scripts/test-connection-status.mjs
       - run: node scripts/test-account-refresh.mjs
       - run: node scripts/test-msal-callback.mjs

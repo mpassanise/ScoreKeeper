@@ -49,6 +49,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    return record&&state.active?.selector===selector?issue({kind:'account' as const,revision:record.revision,...state.active}):null;
   },
   async signOut(proof:DurableLease|VerificationTicket){const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null})},
+  async isDeletionBlocked(profileId:string){if(closed)throw new AccountAccessError('STALE_ACCOUNT');if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');const state=lifecycle(await documents.read(KEY));if(closed)throw new AccountAccessError('STALE_ACCOUNT');return state.blockedProfiles.includes(profileId)},
   async beginDeletion(proof:DurableLease){account(proof);const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,proof.profileId])]})},
   connectionUnavailable(proof:DurableLease){account(proof);confirmed.delete(proof)},
   async readConfirmed(proof:DurableLease,gameId:string){account(proof);await current(proof);const value=await repository.readConfirmed(proof.profileId,gameId);await current(proof);return value},
