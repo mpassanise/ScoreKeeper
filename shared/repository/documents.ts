@@ -1,6 +1,14 @@
 import {LocalRepositoryError} from './confirmed-games';
 export type DocumentRecord={revision:number;value:unknown};
-export type AtomicDocuments={read:(key:string)=>Promise<DocumentRecord|null>;write:(key:string,expectedRevision:number,value:unknown)=>Promise<DocumentRecord>};
+export type DocumentGuard={key:string;revision:number};
+export function documentGuards(guards:readonly DocumentGuard[]=[]):DocumentGuard[]{
+ if(!Array.isArray(guards)||guards.length>8||guards.some(g=>!g||typeof g.key!=='string'||!g.key.trim()||!Number.isSafeInteger(g.revision)||g.revision<0))throw new LocalRepositoryError('STORAGE_CONFLICT','Invalid transaction guard.');
+ return guards.map(g=>({...g}));
+}
+export function checkDocumentGuard(existing:unknown,guard:DocumentGuard){
+ if((existing===undefined?0:documentRecord(existing).revision)!==guard.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Account or repository state changed. Existing data has been kept.');
+}
+export type AtomicDocuments={read:(key:string)=>Promise<DocumentRecord|null>;write:(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[])=>Promise<DocumentRecord>};
 export function documentValue(value:unknown):unknown{try{const raw=JSON.stringify(value);if(raw===undefined)throw Error();return JSON.parse(raw)}catch{throw new LocalRepositoryError('STORAGE_CORRUPT','Repository metadata could not be encoded. Existing data has been kept.')}}
 export function documentRecord(value:unknown):DocumentRecord{
  const record=value as DocumentRecord;
