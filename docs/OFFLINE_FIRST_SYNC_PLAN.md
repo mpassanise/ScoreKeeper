@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 3 increment 8 adds separately disabled read-only account scoring screens for web/iPhone, with API-enforced game-write exclusion. Production flags, replay and live queue writers remain disabled.
+Status: Phase 3 increment 9 adds separately disabled saved-copy recovery for web/iPhone on top of read-only account screens. Production flags, replay and live queue writers remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -10,6 +10,14 @@ Owner: Scorekeeper project. Keep this document as the durable implementation tra
 Opening, resuming and scoring a previously downloaded game must not wait for authentication, the API or SQL. Save changes durably on the device, then sync in the background. Clearly distinguish saved-on-device from confirmed-in-account state. Provide a visible Reconnect action when sync cannot proceed.
 
 Continue using Microsoft Entra External ID and Azure SQL initially. This work separates local interaction from authentication/network availability. It does not extend token lifetimes or guarantee uninterrupted cloud access.
+
+## Required iteration workflow
+
+For every implementation iteration, finish the code and relevant automated checks, then perform a software-architect code review of the complete final PR diff before reporting it ready for merge. Review account isolation and lifecycle races, local durability, original IDs/receipts, unknown outcomes, duplicate prevention, recovery/archive preservation, deletion suppression, error paths, performance and parity between web and iPhone. Passing CI does not replace this review.
+
+Reproduce suspected defects where practical. Fix verified issues within the authorized implementation scope, rerun affected checks, and review the final fix diff. Report unresolved findings by severity and state any unverified browser/physical-device acceptance. Save the iteration outcome and next step here. Do not merge, deploy, activate flags or spend paid Expo builds without the applicable user authorization.
+
+A standalone review request should report verified findings; it does not by itself authorize unrelated implementation changes. This workflow is also recorded in the repository root `AGENTS.md` so later iterations pick it up automatically.
 
 ## Current baseline and risks
 
@@ -269,3 +277,10 @@ Unknown operation outcomes, same-version collisions, receipt/content mismatches 
 New flags: `NEXT_PUBLIC_GAME_RECOVERY_PILOT` and `EXPO_PUBLIC_GAME_RECOVERY_PILOT`, both false/absent by default and effective only with their existing cache/screen pilots. No production flags or EAS settings are changed. No API/schema deployment or paid Expo build is required to merge this client-only increment. New regression checks run against IndexedDB and desktop SQLite and are included in CI.
 
 Next: collision-aware queued writer/delivery gates and a captured-account manual delivery bridge through the existing connection controls, then queue-aware home/recovery summaries and the remaining adoption/privacy/retention/performance/device gates before controlled activation. Keep all backend/client pilots disabled.
+
+
+### PR #73 post-implementation architecture review
+
+Reviewed implementation head `653a1ee` after all four CI jobs passed. One P2 finding remains before merge: both `reviewSavedCopies` handlers update `accountRead` but only update `view` for a live game result. If the repository now returns `pending-delete` or `deleted`, the old live selection remains visible. Reproduced with real IndexedDB and desktop SQLite deletion states and the actual web/iPhone state-adoption handlers; this was not a physical-device or browser end-to-end test. No storage loss or write-policy bypass was observed, but the screen violates the existing deletion-suppression contract.
+
+Next correction: centralize or consistently apply non-live recovery-read adoption in both shells, clear/suppress the selected live game and stale home summary as appropriate, preserve access to review evidence, and add app-adoption regression coverage for pending/confirmed deletion (including missing reads). Review the final fix diff and rerun affected checks before marking PR #73 ready. Runtime implementation was not changed by this standalone review. Mandatory per-iteration review is now recorded above and in root `AGENTS.md`.
