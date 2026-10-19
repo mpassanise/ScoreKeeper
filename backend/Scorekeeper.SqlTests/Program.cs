@@ -15,6 +15,7 @@ async Task Reject<T>(Func<Task> work)where T:Exception{try{await work();throw ne
 async Task Sql(string connection,string sql){await using var c=new SqlConnection(connection);await c.OpenAsync();await using var q=c.CreateCommand();q.CommandText=sql;q.CommandTimeout=60;await q.ExecuteNonQueryAsync();}
 async Task<long> Count(string connection,string table,string owner){await using var c=new SqlConnection(connection);await c.OpenAsync();await using var q=c.CreateCommand();q.CommandText=$"SELECT COUNT_BIG(*) FROM dbo.{table} WHERE OwnerKey=@owner";q.Parameters.Add("@owner",SqlDbType.Char,64).Value=GameStore.OwnerKey(owner);return (long)(await q.ExecuteScalarAsync())!;}
 var dbAdmin=new SqlConnectionStringBuilder(admin.ConnectionString){InitialCatalog=database};
+async Task<bool> CleanupWaitingInTrigger(){await using var c=new SqlConnection(dbAdmin.ConnectionString);await c.OpenAsync();await using var q=c.CreateCommand();q.CommandText="SELECT COUNT(*) FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND wait_type='WAITFOR'";return Convert.ToInt32(await q.ExecuteScalarAsync())>0;}
 var dbApp=new SqlConnectionStringBuilder(dbAdmin.ConnectionString){UserID=login,Password=password,IntegratedSecurity=false};
 GameStore Store(bool enabled=true){Environment.SetEnvironmentVariable("ScorekeeperSql",dbApp.ConnectionString);Environment.SetEnvironmentVariable("ScorekeeperGameOperationsEnabled",enabled?"true":"false");return new(NullLogger<GameStore>.Instance);}
 var migrations=new[]{"backend/schema.sql","backend/migrations/002_account_deletion.sql","backend/migrations/003_frequent_players.sql","backend/migrations/004_game_operation_receipts.sql","backend/migrations/005_game_lifecycle_operations.sql"};
@@ -41,6 +42,15 @@ try{
  await store.Replace(priorOwner,scoredPrior,1);await store.Replace(priorOwner,Scoring.Apply(scoredPrior,new(2,"undo")),2);
  await Sql(dbAdmin.ConnectionString,$"INSERT dbo.GameOperationReceipts(OwnerKey,OperationId,GameId,Fingerprint,Acknowledgement,AddedEntryId) VALUES('{GameStore.OwnerKey(priorOwner)}','{priorOp}','{priorGame.Id}','{priorHash}',N'{JsonSerializer.Serialize(priorAck,GameStore.Json)}','{priorEntry}')");
  var unicodeOwner="sql-owner-\u00e9-\U0001F3B2";var backfilled=Scoring.Apply(game with{Id=Guid.NewGuid()},new(1,"score",9));await store.Insert(unicodeOwner,backfilled);
+ var migrationRaceOwner="sql-migration-delete-race";var migrationRaceGame=Scoring.Apply(Scoring.Create(Guid.NewGuid(),"Migration race",["One","Two"],"high"),new(1,"score",4));await store.Insert(migrationRaceOwner,migrationRaceGame);
+ await Sql(dbAdmin.ConnectionString,$"INSERT dbo.FrequentPlayers(OwnerId,State,Updated) VALUES(N'{migrationRaceOwner}',N'[]',SYSDATETIMEOFFSET())");await store.BeginDeletion(migrationRaceOwner);
+ await Sql(dbAdmin.ConnectionString,$"CREATE TRIGGER dbo.TestDeletionMigrationRace ON dbo.FrequentPlayers AFTER DELETE AS BEGIN IF EXISTS(SELECT 1 FROM deleted WHERE OwnerId=N'{migrationRaceOwner}') WAITFOR DELAY '00:00:05'; END");
+ var cleanupTask=store.CompleteDeletion(migrationRaceOwner);
+ var cleanupPaused=false;for(var attempt=0;attempt<100&&!cleanupPaused;attempt++){cleanupPaused=await CleanupWaitingInTrigger();if(!cleanupPaused)await Task.Delay(50);}
+ Check(cleanupPaused,"account cleanup reached the migration interleaving point");
+ var migrationTask=Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4]));await Task.WhenAll(cleanupTask,migrationTask);
+ await Sql(dbAdmin.ConnectionString,"DROP TRIGGER dbo.TestDeletionMigrationRace");
+ Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",migrationRaceOwner)==0&&await store.Get(migrationRaceOwner,migrationRaceGame.Id) is null,"schema lock prevents migration backfill from surviving completed account deletion");
  await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4]));
  Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",unicodeOwner)==1,"migration backfills identifiers with identical UTF-8 owner hash");
  Check(await store.OperationCapability() is not null,"enabled installed lifecycle schema advertises operations");

@@ -28,6 +28,11 @@ public sealed partial class GameStore(ILogger<GameStore> logger) : IAccountDelet
   await using var q=c.CreateCommand();q.Transaction=tx;
   q.CommandText="DECLARE @result int; EXEC @result=sys.sp_getapplock @Resource=@key,@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; IF @result<0 THROW 51000,'Account is busy; retry after refreshing.',1;";q.Parameters.AddWithValue("@key","scorekeeper:"+OwnerKey(owner));await q.ExecuteNonQueryAsync();
  }
+ static async Task LockOperationsSchema(SqlConnection c,SqlTransaction tx)
+ {
+  await using var q=c.CreateCommand();q.Transaction=tx;
+  q.CommandText="DECLARE @result int; EXEC @result=sys.sp_getapplock @Resource='scorekeeper:operations-schema',@LockMode='Shared',@LockOwner='Transaction',@LockTimeout=10000; IF @result<0 THROW 51001,'Operation schema is busy; retry after refreshing.',1;";await q.ExecuteNonQueryAsync();
+ }
  static async Task Guard(SqlConnection c,SqlTransaction tx,string owner)
  {
   await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="SELECT 1 FROM dbo.AccountDeletions WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));if(await q.ExecuteScalarAsync() is not null)throw new AccountDeletingException();
@@ -39,7 +44,7 @@ public sealed partial class GameStore(ILogger<GameStore> logger) : IAccountDelet
  }
  public async Task CompleteDeletion(string owner)
  {
-  await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);
+  await using var c=await Connect();await using var tx=(SqlTransaction)await c.BeginTransactionAsync();await LockOwner(c,tx,owner);await LockOperationsSchema(c,tx);
   await using var q=c.CreateCommand();q.Transaction=tx;q.CommandText="IF OBJECT_ID('dbo.GameEntryReservations','U') IS NOT NULL EXEC sys.sp_executesql N'DELETE FROM dbo.GameEntryReservations WHERE OwnerKey=@key',N'@key char(64)',@key; IF OBJECT_ID('dbo.GameOperationReceipts','U') IS NOT NULL EXEC sys.sp_executesql N'DELETE FROM dbo.GameOperationReceipts WHERE OwnerKey=@key',N'@key char(64)',@key; DELETE FROM dbo.FrequentPlayerOperations WHERE OwnerId=@owner; DELETE FROM dbo.FrequentPlayers WHERE OwnerId=@owner; DELETE FROM dbo.Games WHERE OwnerId=@owner; UPDATE dbo.AccountDeletions SET Status='completed',OwnerId=NULL,CompletedAt=COALESCE(CompletedAt,SYSDATETIMEOFFSET()) WHERE OwnerKey=@key";q.Parameters.AddWithValue("@key",OwnerKey(owner));q.Parameters.AddWithValue("@owner",owner);await q.ExecuteNonQueryAsync();await tx.CommitAsync();
  }
  public async Task<Game?> Get(string owner,Guid id)
