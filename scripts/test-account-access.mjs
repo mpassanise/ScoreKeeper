@@ -43,7 +43,7 @@ try{
  }
  const {openWebAccountRepository}=require(path.join(root,'repository/web-account-repository.js')),{openNativeAccountRepository}=require(path.join(root,'repository/native-account-repository.js'));
  for(const openAccess of [()=>openWebAccountRepository(new IDBFactory(),'guarded'),()=>openNativeAccountRepository(sqlite())]){
-  const access=await openAccess(),lease=access.beginSession('verified-selector','factory-profile');await rejects(()=>access.readConfirmed(lease,'same-game'),'ACCOUNT_UNVERIFIED');access.verify(lease,status('factory-profile'));await access.saveConfirmed(lease,[view]);assert.ok(await access.readConfirmed(lease,'same-game'));await access.close();await rejects(()=>access.readConfirmed(lease,'same-game'),'STALE_ACCOUNT');await rejects(()=>access.beginSession('later'),'STALE_ACCOUNT');
+  const access=await openAccess(),ticket=await access.beginVerification('verified-selector','factory-profile');assert.equal(await access.restore('verified-selector'),null);const lease=await access.verify(ticket,status('factory-profile'));await access.saveConfirmed(lease,[view]);assert.ok(await access.readConfirmed(lease,'same-game'));await access.close();await rejects(()=>access.readConfirmed(lease,'same-game'),'STALE_ACCOUNT');await rejects(()=>access.beginVerification('later'),'STALE_ACCOUNT');
  }
  console.log('Web and native integration factories enforce the same account gate and revoke access on close.');
 }finally{rmSync(root,{recursive:true,force:true})}

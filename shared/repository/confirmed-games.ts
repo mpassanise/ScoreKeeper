@@ -1,3 +1,4 @@
+import type {AtomicDocuments} from './documents';
 import type {GameView} from '../api';
 import {gameView,validateRules} from '../local-games';
 import {validateScoreLimit} from '../score-limit';
@@ -5,12 +6,13 @@ import {validateScoreLimit} from '../score-limit';
 /** Confirmed reads only. No projection, outbox, guest adoption or network writes. */
 export type ConfirmedSnapshot={schemaVersion:1;profileId:string;gameId:string;serverVersion:number;view:GameView};
 export type ConfirmedGames={
+ documents:AtomicDocuments;
  readConfirmed(profileId:string,gameId:string):Promise<ConfirmedSnapshot|null>;
  saveConfirmed(profileId:string,views:GameView[]):Promise<void>;
  close():void|Promise<void>;
 };
 export class LocalRepositoryError extends Error{
- constructor(readonly code:'INVALID_SNAPSHOT'|'VERSION_COLLISION'|'STORAGE_UNAVAILABLE'|'STORAGE_BLOCKED'|'STORAGE_CORRUPT',message:string){super(message);this.name='LocalRepositoryError'}
+ constructor(readonly code:'STORAGE_CONFLICT'|'INVALID_SNAPSHOT'|'VERSION_COLLISION'|'STORAGE_UNAVAILABLE'|'STORAGE_BLOCKED'|'STORAGE_CORRUPT',message:string){super(message);this.name='LocalRepositoryError'}
 }
 export function requireIdentity(value:string){
  if(typeof value!=='string'||!value.trim())throw new LocalRepositoryError('INVALID_SNAPSHOT','A stable account and game identity is required.');

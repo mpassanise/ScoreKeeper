@@ -1,3 +1,4 @@
+import {documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
 import type {GameView} from '../api';
 import {canonical,checkStored,LocalRepositoryError,requireIdentity,snapshot,type ConfirmedGames,type ConfirmedSnapshot} from './confirmed-games';
 
@@ -33,7 +34,7 @@ export async function openSQLiteConfirmedGames(db:SQLiteConnection):Promise<Conf
   await db.withExclusiveTransactionAsync(async tx=>{
    await durable(tx);
    const version=await tx.getFirstAsync<{user_version:number}>('PRAGMA user_version');
-   if(!version||![0,1].includes(version.user_version))throw new LocalRepositoryError('STORAGE_CORRUPT','Account storage has an unsupported schema. It has been kept.');
+   if(!version||![0,1,2].includes(version.user_version))throw new LocalRepositoryError('STORAGE_CORRUPT','Account storage has an unsupported schema. It has been kept.');
    if(version.user_version===0){
     const existing=await tx.getFirstAsync<{count:number}>("SELECT count(*) AS count FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'");
     if(!existing||existing.count!==0)throw new LocalRepositoryError('STORAGE_CORRUPT','Unrecognized account storage requires review. It has been kept.');
@@ -43,6 +44,12 @@ export async function openSQLiteConfirmedGames(db:SQLiteConnection):Promise<Conf
    const columns=await tx.getAllAsync<{name:string;type:string;notnull:number;pk:number}>('PRAGMA table_info(confirmed_games)');
    const expected=[['profile_id','TEXT',1,1],['game_id','TEXT',1,2],['server_version','INTEGER',1,0],['snapshot','TEXT',1,0]];
    if(canonical(columns.map(c=>[c.name,c.type,c.notnull,c.pk]))!==canonical(expected))throw new LocalRepositoryError('STORAGE_CORRUPT','Account storage schema is incomplete. It has been kept.');
+   if(version.user_version<2){
+    await tx.execAsync('CREATE TABLE repository_metadata (key TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL, document TEXT NOT NULL)');
+    await tx.execAsync('PRAGMA user_version = 2');
+   }
+   const metadata=await tx.getAllAsync<{name:string;type:string;notnull:number;pk:number}>('PRAGMA table_info(repository_metadata)');
+   if(canonical(metadata.map(c=>[c.name,c.type,c.notnull,c.pk]))!==canonical([['key','TEXT',1,1],['revision','INTEGER',1,0],['document','TEXT',1,0]]))throw new LocalRepositoryError('STORAGE_CORRUPT','Account metadata schema is incomplete. It has been kept.');
   });
   // Journal mode is database-wide and cannot be changed inside a transaction.
   await db.execAsync('PRAGMA journal_mode = WAL');
@@ -54,7 +61,12 @@ export async function openSQLiteConfirmedGames(db:SQLiteConnection):Promise<Conf
   if(closing)return Promise.reject(new LocalRepositoryError('STORAGE_UNAVAILABLE','Account storage is closed.'));
   const result=queue.then(work).catch(error=>{throw storageError(error)});queue=result.catch(()=>{});return result;
  }
+ function decodeDocument(row:{revision:number;document:string}){try{return documentRecord({revision:row.revision,value:JSON.parse(row.document)})}catch{throw new LocalRepositoryError('STORAGE_CORRUPT','Repository metadata is invalid. Existing data has been kept.')}}
  return {
+  documents:{
+   read(key:string){requireIdentity(key);return serialize(async()=>{const row=await db.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);return row?decodeDocument(row):null})},
+   write(key:string,expectedRevision:number,value:unknown){requireIdentity(key);const copy=documentValue(value);return serialize(async()=>{let result:DocumentRecord;await db.withExclusiveTransactionAsync(async tx=>{await durable(tx);const row=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);result=nextDocument(row?decodeDocument(row):undefined,expectedRevision,copy);await tx.runAsync('INSERT INTO repository_metadata (key, revision, document) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, document = excluded.document',key,result.revision,JSON.stringify(result.value))});return result!})}
+  },
   readConfirmed(profileId:string,gameId:string){
    requireIdentity(profileId);requireIdentity(gameId);
    return serialize(async()=>{
