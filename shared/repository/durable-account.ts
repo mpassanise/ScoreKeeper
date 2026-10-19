@@ -27,6 +27,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
  }
  async function write(expected:number,state:Lifecycle){if(closed)throw new AccountAccessError('STALE_ACCOUNT');try{return await documents.write(KEY,expected,state)}catch(error){if(error instanceof LocalRepositoryError&&error.code==='STORAGE_CONFLICT')throw new AccountAccessError('STALE_ACCOUNT');throw error}}
  async function accept(proof:DurableLease|VerificationTicket,status:AccountStatus){
+  if(proof.kind==='account')confirmed.delete(proof);
   const {record,state}=await current(proof),profileId=status.profileId;
   if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');
   const expected=proof.kind==='account'?proof.profileId:state.pending?.expectedProfileId;
