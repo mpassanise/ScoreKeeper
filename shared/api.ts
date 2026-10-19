@@ -1,3 +1,4 @@
+import type {OperationAcknowledgement} from './game-operation-contract';
 import type {GameOperationCapability} from './game-operation-contract';
 import {applyGameEdit} from './game-edit';
 import type {PlayerChange,PlayerProfile} from './frequent-player-sync';
@@ -29,7 +30,7 @@ export class ScorekeeperApi{
   let timer:ReturnType<typeof setTimeout>;
   try{return await Promise.race([this.token(),new Promise<string>((_,reject)=>{timer=setTimeout(()=>reject(new ApiError(408,'Sign-in token refresh timed out. Use Reconnect to try again.')),30000)})])}finally{clearTimeout(timer!)}
  }
- private async request<T>(path:string,body?:unknown):Promise<T>{
+ private async request<T>(path:string,body?:unknown,rawJson=false):Promise<T>{
   const signal=this.options.signal;if(signal?.aborted)throw cancelled();
   const accessToken=await abortable(this.accessToken(),signal),read=body===undefined;
   const attempts=read?Math.max(1,Math.min(3,this.options.readAttempts??3)):1;
@@ -39,7 +40,7 @@ export class ScorekeeperApi{
    const controller=new AbortController(),started=Date.now(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});let timer:ReturnType<typeof setTimeout>;
    try{
     const work=async()=>{
-     const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},body:read?undefined:JSON.stringify(body),signal:controller.signal});
+     const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},body:read?undefined:rawJson?body as string:JSON.stringify(body),signal:controller.signal});
      const value:unknown=await response.json().catch(()=>null);
      if(!response.ok){
       const data=value&&typeof value==="object"?value as Record<string,unknown>:{};
@@ -61,6 +62,8 @@ export class ScorekeeperApi{
  }
 
  private async requireRoundEnding(rules:Rules){if(rules.targetEnd==='round'&&((await this.account()).scoringRulesVersion||0)<3)throw new Error('End-of-round scoring is not available for your account yet. Sync Games after the API update, or sign out to play locally.')}
+ // Inactive replay transport seam; preserve the exact admitted queue bytes, with no write retry here.
+ operation(wire:string){if(typeof wire!=='string'||!wire.trim()||wire.length>2_000_000)throw new Error('Use one bounded immutable operation.');const envelope=JSON.parse(wire);if(!envelope||envelope.protocolVersion!==1||!['action','create','import','delete'].includes(envelope.kind))throw new Error('Use a v1 game operation.');return this.request<OperationAcknowledgement>('/game-operations',wire,true)}
  syncFrequentPlayers(profileId:string,changes:PlayerChange[]){return this.request<PlayerProfile>("/players/sync",{profileId,changes})}
  account(){return this.request<AccountStatus>("/account")}
  deleteAccount(confirmation:string){return this.request<AccountDeletion>("/account/delete",{confirmation})}

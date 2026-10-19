@@ -1,6 +1,8 @@
 import type {AccountStatus,GameView} from '../api';
 import {AccountAccessError} from './account-access';
 import {LocalRepositoryError,type ConfirmedGames} from './confirmed-games';
+import {createOperationTransport} from './operation-transport';
+import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
 import {createGameOutbox} from './game-outbox';
 import type {AtomicDocuments,DocumentRecord} from './documents';
 type Active={selector:string;profileId:string};
@@ -18,7 +20,8 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
 }
 /** Durable account state shared by IndexedDB and SQLite; no tokens or email keys. */
 export function createDurableAccountRepository(repository:ConfirmedGames){
- const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>();let closed=false;
+ const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>();let closed=false;const deliveries=new Set<{close:()=>void}>();
+ function stopDeliveries(){for(const worker of deliveries)worker.close();deliveries.clear()}
  function issue<T extends object>(value:T):Readonly<T>{const proof=Object.freeze(value);issued.add(proof);return proof}
  function check(proof:DurableLease|VerificationTicket){if(closed||!issued.has(proof))throw new AccountAccessError('STALE_ACCOUNT')}
  function account(proof:DurableLease){check(proof);if(proof.kind!=='account')throw new AccountAccessError('ACCOUNT_UNVERIFIED')}
@@ -28,7 +31,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
  }
  async function write(expected:number,state:Lifecycle){if(closed)throw new AccountAccessError('STALE_ACCOUNT');try{return await documents.write(KEY,expected,state)}catch(error){if(error instanceof LocalRepositoryError&&error.code==='STORAGE_CONFLICT')throw new AccountAccessError('STALE_ACCOUNT');throw error}}
  async function accept(proof:DurableLease|VerificationTicket,status:AccountStatus){
-  if(proof.kind==='account'){confirmed.delete(proof);offlineWrites.delete(proof);}
+  if(proof.kind==='account'){stopDeliveries();confirmed.delete(proof);offlineWrites.delete(proof);}
   const {record,state}=await current(proof),profileId=status.profileId;
   if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');
   const expected=proof.kind==='account'?proof.profileId:state.pending?.expectedProfileId;
@@ -36,11 +39,11 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
   const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);return lease;
  }
- return {
+ const api={
   async beginVerification(selector:string,expectedProfileId?:string):Promise<VerificationTicket>{
    if(closed)throw new AccountAccessError('STALE_ACCOUNT');
    if(!nonempty(selector)||(expectedProfileId!==undefined&&!nonempty(expectedProfileId)))throw new AccountAccessError('ACCOUNT_UNVERIFIED');
-   const record=await documents.read(KEY),state=lifecycle(record),next=await write(record?.revision||0,{...state,active:null,pending:{selector,...(expectedProfileId?{expectedProfileId}:{})}});
+   stopDeliveries();const record=await documents.read(KEY),state=lifecycle(record),next=await write(record?.revision||0,{...state,active:null,pending:{selector,...(expectedProfileId?{expectedProfileId}:{})}});
    return issue({kind:'verification' as const,revision:next.revision,selector});
   },
   verify:accept,
@@ -49,10 +52,10 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    if(closed)throw new AccountAccessError('STALE_ACCOUNT');
    return record&&state.active?.selector===selector?issue({kind:'account' as const,revision:record.revision,...state.active}):null;
   },
-  async signOut(proof:DurableLease|VerificationTicket){const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null})},
+  async signOut(proof:DurableLease|VerificationTicket){check(proof);stopDeliveries();const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null})},
   async isDeletionBlocked(profileId:string){if(closed)throw new AccountAccessError('STALE_ACCOUNT');if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');const state=lifecycle(await documents.read(KEY));if(closed)throw new AccountAccessError('STALE_ACCOUNT');return state.blockedProfiles.includes(profileId)},
-  async beginDeletion(proof:DurableLease){account(proof);const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,proof.profileId])]})},
-  connectionUnavailable(proof:DurableLease){account(proof);confirmed.delete(proof)},
+  async beginDeletion(proof:DurableLease){account(proof);stopDeliveries();confirmed.delete(proof);offlineWrites.delete(proof);const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,proof.profileId])]})},
+  connectionUnavailable(proof:DurableLease){account(proof);stopDeliveries();confirmed.delete(proof)},
   async readConfirmed(proof:DurableLease,gameId:string){account(proof);await current(proof);const value=await repository.readConfirmed(proof.profileId,gameId);await current(proof);return value},
   async saveConfirmed(proof:DurableLease,views:GameView[]){account(proof);const detached=JSON.parse(JSON.stringify(views)) as GameView[];await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');await repository.saveConfirmed(proof.profileId,detached);await current(proof)},
   outbox(proof:DurableLease){
@@ -62,6 +65,20 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
     async readConfirmed(gameId){account(proof);await current(proof);const value=await repository.readConfirmed(proof.profileId,gameId);await current(proof);return value}
    });
   },
-  async close(){closed=true;await repository.close()}
+  delivery(proof:DurableLease,transport:DeliveryTransport,options:DeliveryOptions={}){
+   account(proof);const worker=createGameDelivery(api.outbox(proof),transport,{
+    profileId:proof.profileId,
+    async assert(){account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE')},
+    async blockAccount(){await api.beginDeletion(proof)}
+   },options);deliveries.add(worker);const close=worker.close;worker.close=()=>{close();deliveries.delete(worker)};return worker;
+  },
+  httpDelivery(proof:DurableLease,base:string,getToken:(account:Readonly<{selector:string;profileId:string}>,signal:AbortSignal)=>Promise<string>,options:DeliveryOptions={}){
+   account(proof);const scope={profileId:proof.profileId,async assert(){account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE')}};
+   const transport=createOperationTransport(base,(profileId,signal)=>getToken(Object.freeze({selector:proof.selector,profileId}),signal),scope);
+   return api.delivery(proof,transport,options);
+  },
+  async close(){closed=true;stopDeliveries();await repository.close()}
+
  };
+ return api;
 }
