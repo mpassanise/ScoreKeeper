@@ -1,0 +1,45 @@
+# Server reconciliation and retained conflict review — Phase 3, increment 5
+
+Status: shared inactive repository implementation for web IndexedDB and iPhone SQLite. Both live scoring writers and all rollout flags remain unchanged. No HTTP transport, background retry loop, review UI, automatic adoption or local-first writer cutover is installed.
+
+## Receiving authoritative observations
+
+`outbox.observeSnapshot(confirmedSnapshot)` accepts a complete validated snapshot bound to the profile/game/version captured when the authenticated GET began. The active durable lease must still have sync permission; mismatched profiles and stale account callbacks cannot install it. Never wrap a late response using the currently selected account. Never treat a capped list omission, offline error, timeout, generic 404 or guessed version as a deletion observation.
+
+The observation is saved as a separate candidate in the same guarded queue document. Pending/uncertain requests, the original base and the device projection remain unchanged. Even a snapshot containing the exact score/entry ID cannot acknowledge an uncertain request: replay the original request and recover its receipt first. Stale observations do not roll a newer candidate/base backwards. Same-version scoring/timestamp disagreements raise a version collision. Optional null/default wire fields are compared by their scoring meaning, without rewriting retained authoritative bytes. The confirmed snapshot validator now accepts the C# API's nullable optional preset fields.
+
+After every operation is acknowledged as applied, `settle(gameId)` can adopt a candidate at or above the last committed version. At the exact committed version, scoring content must match the projection; server-assigned timestamps and optional defaults may differ. A mismatch keeps both sources and pauses new changes/delivery pending investigation or an authoritative refresh. A later complete version may include legitimate changes from another device and can become the new base once no local outcome is unresolved. A snapshot older than the last receipt cannot finish reconciliation.
+
+Observation capture and settlement are separate guarded commits. This intentionally permits recovery after interruption between them: the candidate remains available, and settlement re-reads current state. A concurrent enqueue, account change or newer observation cannot be overwritten by an earlier context.
+
+## Safe compaction and duplicate prevention
+
+The queue document advances from schema 1 to schema 2. Reads decode version 1 into version 2 in memory, preserving every existing operation and game ID; they do not write. The first successful CAS writes the upgraded document. A failed upgrade/write leaves the old document intact. Unknown versions or malformed records fail closed without resetting data. The IndexedDB/SQLite database schema remains version 2; no database migration is needed.
+
+When settlement is safe, one CAS moves applied requests/receipts into a retained archive, installs the authoritative base/projection and clears the active operation list. The archive retains exact immutable request bytes, operation IDs and acknowledgements. Retrying an archived applied request is a no-op; changing its payload under the same ID is rejected. Late identical acknowledgements remain recognizable after compaction. Neither retirement nor refresh frees known entry IDs: per-game reservations retain IDs from prior bases, observations, projections and original operations, including scores subsequently undone elsewhere.
+
+This is active-queue compaction, not automatic archive erasure. It reduces active replay work and removes obsolete duplicated bases/projections after confirmed settlement; request/recovery evidence remains on the device. Active operations remain capped at 500, archived operations at 10,000, staged games at 50 and the whole document at 8 MB. The merged acknowledgement-size reserve is preserved so admitted requests retain room for terminal transitions. Storage/capacity failure preserves the previous document. Archives have no expiry or automatic eviction. Archive export/retention, larger-scale indexing and local account erasure remain activation gates.
+
+The reconciled base belongs to the queue document. The separate generic confirmed-read cache is not updated by a second non-atomic write, and legacy local sources are untouched. The future delivery/read coordinator must route tracked games through this authoritative queue state; it must not reseed a newer queue base from an older generic cache. Updating that cache independently must never replace pending projections or drive delivery.
+
+## Explicit conflict review
+
+A terminal rejected receipt stops automatic delivery of its dependants. A sufficiently recent complete account snapshot (at least the observed/relevant committed version) makes `review(gameId)` return the device projection, account snapshot, rejection, dependent count and current outbox revision. Without such evidence the changes remain pending for review; uncertainty is never resolved by guessing.
+
+The caller may keep the device changes for later simply by leaving the review unresolved. `useAccountVersion(gameId, expectedRevision, resolutionId)` is an explicit account-version selection, requiring fresh verification, an unchanged review revision and a separate stable decision ID. A changed queue/candidate forces a fresh review. This operation archives the original base, device projection, applied/rejected/unsent requests and the exact selected account snapshot in the same transaction that installs the account base and clears active changes. Requests in that recovery archive are not silently discarded or rebased and are never automatically resubmitted. Reusing a reviewed unsent/rejected operation ID returns NEEDS_REVIEW; any future reapplication must be separately reviewed and use new operation identities. Identical review retries after a lost response are idempotent.
+
+This increment provides the review data and guarded decision primitive, not a user-facing conflict dialog. Keep writer activation off until the UI can explain the choice, preserve/recover local work, and handle storage failure. Applied-receipt/content mismatches without a terminal rejection remain an investigation state, not a shortcut for overwriting unexplained data.
+
+## Deletion barriers
+
+An applied delete receipt can settle into a retained local tombstone with its committed version, even though a deleted game has no readable snapshot. The original receipt/request is archived atomically with the marker. For a game deleted elsewhere, a terminal GAME_DELETED receipt with a valid observed version supplies evidence for an explicit account-deletion selection. A contradictory same/newer live snapshot does not override the deletion proof. The decoder verifies local tombstones against retained deletion evidence.
+
+A tombstoned game ID cannot be reused by a new request or resurrected by a refresh, even a nominally higher-version snapshot. Late original creation/import/delete acknowledgements return metadata only and do not recreate the projection. No deletion is inferred from absence in a capped list or a missing generic cache row.
+
+## Evidence, deployment and next increment
+
+`node scripts/test-game-reconciliation.mjs` exercises both production adapters with fake IndexedDB and real desktop SQLite. It covers uncertain matching snapshots, stale/newer versions, C# nullable defaults, exact-version content mismatches, compaction/review rollback and lost commit responses, late acknowledgements, retained IDs and dependants, legitimate new identical scores, import history, applied prefixes before rejection, deletion proof/tombstones, v1 preservation/upgrade, restart, account mismatch/revocation races and corruption preservation. Existing outbox tests retain abrupt process-death checks before/after the same atomic metadata transaction, near-capacity acknowledgement reserve tests and all prior safety checks. Real SQL CI remains independent server replay evidence; these tests do not establish authenticated HTTP or physical-device acceptance.
+
+After merge, no API/schema deployment or paid Expo build is needed for this inactive increment. Keep `ScorekeeperGameOperationsEnabled=false`, both cache pilot flags off and all future queue/write flags disabled. Do not roll an activated v2 queue back to code that only understands v1; leave documents and archives intact during recovery.
+
+Next: an inactive delivery/reconnect coordinator for both clients, using the immutable queue and authoritative reconciliation path. Bind each request to its captured account lease; stop/abort on account changes; bound retry/backoff; distinguish token/network failures from terminal receipts; refresh the authoritative game after acknowledgements without replacing pending work. Then finish conflict/recovery UX, archive/local-erasure/performance and browser/physical-iPhone acceptance before a controlled writer pilot. Existing local games must remain intact throughout.

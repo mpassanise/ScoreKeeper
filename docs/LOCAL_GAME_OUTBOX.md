@@ -35,3 +35,7 @@ Existing durable repository, lifecycle, staging and pilot regressions remain req
 The user reports PR #67 merged, migration 005 applied and API deployed. This is reported production state, not independent verification. This increment requires no API/schema deployment and no paid Expo build. Keep backend and both client pilot flags false. Merge alone does not open the queue or migrate existing device data.
 
 Next implement authoritative receipt-to-snapshot reconciliation, explicit conflict review and safe compaction, then a separately disabled delivery coordinator using this queue and the existing reconnect lifecycle. Ensure refresh cannot replace a pending projection, uncertain creation/import is resolved before dependent work, deletion cannot resurrect data, and account changes stop a sender. Retain all existing local sources and original IDs. Complete browser/physical-iPhone and privacy acceptance before switching live writers or enabling a limited local-first scoring pilot. A native pilot requires a binary with the SQLite module; do not spend an EAS build before it is needed.
+
+## Increment 5 extension
+
+[Server reconciliation and retained conflict review](GAME_SNAPSHOT_RECONCILIATION.md) adds queue document version 2, authoritative candidates, retained compaction archives, revision-checked account-version selection and receipt-backed local tombstones. The earlier no-reconciliation notes describe increment 4. The current layer remains inactive; no live writer or HTTP sender is installed.

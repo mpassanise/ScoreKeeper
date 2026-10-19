@@ -35,7 +35,9 @@ export function snapshot(profileId:string,input:GameView):ConfirmedSnapshot{
   if(!g||!requireIdentity(g.id)||g.deviceOnly||typeof g.name!=='string'||typeof g.finished!=='boolean'||!Number.isSafeInteger(g.version)||g.version<1||typeof g.updated!=='string'||!Number.isFinite(Date.parse(g.updated)))throw Error();
   if(!Array.isArray(g.players)||g.players.length<2||g.players.length>20||g.players.some(p=>!p||!requireIdentity(p.id)||typeof p.name!=='string')||new Set(g.players.map(p=>p.id)).size!==g.players.length)throw Error();
   if(!g.players.some(p=>p.id===g.next)||!Array.isArray(g.entries)||g.entries.length>10000||g.entries.some(e=>!e||!requireIdentity(e.id)||!g.players.some(p=>p.id===e.playerId)||!Number.isSafeInteger(e.points)||Math.abs(e.points)>100000)||new Set(g.entries.map(e=>e.id)).size!==g.entries.length)throw Error();
-  validateRules(g.winner,g);validateScoreLimit(g);
+  // The C# wire format emits null for optional preset fields. Validate their
+  // absent meaning without rewriting the authoritative snapshot bytes.
+  validateRules(g.winner,{...g,presetId:g.presetId??undefined,presetVersion:g.presetVersion??undefined});validateScoreLimit(g);
   const expected=gameView(g);
   if(canonical(view.totals)!==canonical(expected.totals)||!Array.isArray(view.winnerIds)||canonical([...view.winnerIds].sort())!==canonical([...expected.winnerIds].sort()))throw Error();
   return {schemaVersion:1,profileId,gameId:g.id,serverVersion:g.version,view};
