@@ -1,5 +1,5 @@
 import type {Game,GameView} from '../api';
-import type {GameOperation,OperationAcknowledgement} from '../game-operation-contract';
+import type {GameOperation,OperationAcknowledgement,OperationError} from '../game-operation-contract';
 import {LocalGames,gameView} from '../local-games';
 import {canonical,checkStored,LocalRepositoryError,snapshot,type ConfirmedSnapshot} from './confirmed-games';
 import type {AtomicDocuments,DocumentGuard} from './documents';
@@ -37,7 +37,7 @@ export function operationFromWire(wire:string):GameOperation{
   }else if(op.kind==='create'||op.kind==='import'){
    fields(op,['protocolVersion','kind','operationId','gameId','expectedVersion','game']);if(op.expectedVersion!==0)throw invalid();const g=object(op.game);fields(g,gameFields);wireRules(g);date(g.updated);for(const key of ['startedAt','endedAt'])if(g[key]!=null)date(g[key]);if(g.finishReason!=null&&!['manual','rounds','target'].includes(g.finishReason as string)||g.endedAt!=null&&g.finished!==true)throw invalid();
    const checked=snapshot('validation',gameView(g as Game)).view.game;id(checked.id);if(checked.id!==op.gameId)throw invalid();for(const p of checked.players){fields(object(p),['id','name']);id(p.id)}for(const e of checked.entries){fields(object(e),['id','playerId','points']);id(e.id)}version(checked.version,1);
-   if(!checked.name.trim()||checked.name.length>60||checked.players.some(p=>!p.name.trim()||p.name.length>30)||new Set(checked.players.map(p=>p.name.trim().toLowerCase())).size!==checked.players.length)throw invalid();
+   if(!checked.name.trim()||checked.name.length>60||checked.players.some(p=>!p.name.trim()||p.name.length>30)||new Set(checked.players.map(p=>p.name.trim().toLowerCase())).size!==checked.players.length||checked.endCondition==='rounds'&&checked.roundLimit!*checked.players.length>10000)throw invalid();
    if(op.kind==='create'&&(checked.version!==1||checked.entries.length||checked.finished||checked.endedAt!=null||checked.finishReason!=null||checked.next!==checked.players[0].id))throw invalid();
   }else if(op.kind==='delete'){
    fields(op,['protocolVersion','kind','operationId','gameId','expectedVersion','game']);version(op.expectedVersion,0);if(op.game!=null)throw invalid();
@@ -46,11 +46,21 @@ export function operationFromWire(wire:string):GameOperation{
  }catch{throw invalid()}
 }
 function expected(op:GameOperation){return op.kind==='action'?op.command.expectedVersion:op.expectedVersion}
+function acknowledgementErrors(op:GameOperation):OperationError[]{return op.kind==='action'?['GAME_NOT_FOUND','GAME_DELETED','VERSION_CONFLICT','UNDO_TARGET_CHANGED','ENTRY_ID_REUSED','INVALID_GAME_COMMAND']:['GAME_NOT_FOUND','GAME_DELETED','GAME_ALREADY_EXISTS','VERSION_CONFLICT','GAME_FINISHED']}
+function transitionReserve(item:QueuedOperation){
+ if(item.status==='applied'||item.status==='rejected')return 0;
+ const op=operationFromWire(item.wire),acknowledgements:OperationAcknowledgement[]=[
+  {operationId:op.operationId,gameId:op.gameId,outcome:'applied',committedVersion:Number.MAX_SAFE_INTEGER,observedVersion:Number.MAX_SAFE_INTEGER,errorCode:null},
+  ...acknowledgementErrors(op).map(errorCode=>({operationId:op.operationId,gameId:op.gameId,outcome:'rejected' as const,committedVersion:null,observedVersion:Number.MAX_SAFE_INTEGER,errorCode}))
+ ];
+ const currentSize=utf8Size(JSON.stringify(item));
+ return Math.max(...acknowledgements.map(ack=>utf8Size(JSON.stringify({...item,status:ack.outcome,acknowledgement:ack}))))-currentSize;
+}
 function validateAck(op:GameOperation,input:unknown):OperationAcknowledgement{
  const ack=object(input);fields(ack,['operationId','gameId','outcome','committedVersion','observedVersion','errorCode']);
- const errors=op.kind==='action'?['GAME_NOT_FOUND','GAME_DELETED','VERSION_CONFLICT','UNDO_TARGET_CHANGED','ENTRY_ID_REUSED','INVALID_GAME_COMMAND']:['GAME_NOT_FOUND','GAME_DELETED','GAME_ALREADY_EXISTS','VERSION_CONFLICT','GAME_FINISHED'];
+ const errors=acknowledgementErrors(op);
  if(ack.operationId!==op.operationId||ack.gameId!==op.gameId||(ack.observedVersion!==null&&(!Number.isSafeInteger(ack.observedVersion)||(ack.observedVersion as number)<1||(ack.observedVersion as number)>Number.MAX_SAFE_INTEGER))||
-  (ack.outcome==='applied'?(ack.committedVersion!==expected(op)+1||ack.observedVersion!==(expected(op)===0?null:expected(op))||ack.errorCode!==null):ack.outcome!=='rejected'||ack.committedVersion!==null||!errors.includes(ack.errorCode as string)))throw new OutboxError('INVALID_ACKNOWLEDGEMENT','The server response did not confirm this operation. It remains pending.');
+  (ack.outcome==='applied'?(ack.committedVersion!==expected(op)+1||ack.observedVersion!==(expected(op)===0?null:expected(op))||ack.errorCode!==null):ack.outcome!=='rejected'||ack.committedVersion!==null||!errors.includes(ack.errorCode as OperationError)))throw new OutboxError('INVALID_ACKNOWLEDGEMENT','The server response did not confirm this operation. It remains pending.');
  return ack as OperationAcknowledgement;
 }
 async function project(op:GameOperation,prior:GameView|null,at:string):Promise<GameView|null>{
@@ -88,7 +98,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
   const state:GameOutbox=record?await decode(record.value,auth.profileId):{schemaVersion:1,profileId:auth.profileId,games:[]};
   await access.authorize(mode);return {auth,key,mode,revision:record?.revision??0,state};
  }
- async function save(context:Awaited<ReturnType<typeof read>>){await access.authorize(context.mode);if(context.state.games.length>50||context.state.games.reduce((n,g)=>n+g.operations.length,0)>500||utf8Size(JSON.stringify(context.state))>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await documents.write(context.key,context.revision,context.state,[context.auth.guard]);await access.authorize(context.mode)}
+ async function save(context:Awaited<ReturnType<typeof read>>){await access.authorize(context.mode);const size=utf8Size(JSON.stringify(context.state)),reserve=context.state.games.reduce((n,g)=>n+g.operations.reduce((m,item)=>m+transitionReserve(item),0),0);if(context.state.games.length>50||context.state.games.reduce((n,g)=>n+g.operations.length,0)>500||size+reserve>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await documents.write(context.key,context.revision,context.state,[context.auth.guard]);await access.authorize(context.mode)}
  return {
   async read(){return (await read()).state},
   async seedConfirmed(gameId:string){const ctx=await read('write'),copy=await access.readConfirmed(gameId);if(!copy||copy.profileId!==ctx.auth.profileId||copy.gameId!==gameId)throw new OutboxError('NEEDS_REVIEW','A complete confirmed account snapshot is required.');const existing=ctx.state.games.find(g=>g.gameId===copy.gameId);if(existing){if(canonical(existing.base)!==canonical(copy))throw new OutboxError('NEEDS_REVIEW','Existing pending or confirmed data requires review.');return}ctx.state.games.push({gameId:copy.gameId,base:copy,projection:copy.view,operations:[]});await save(ctx)},
