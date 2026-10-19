@@ -57,6 +57,8 @@ try{
   const collision=await Promise.allSettled([sameSessionOut.enqueue(concurrentA),sameSessionOut.enqueue(concurrentB)]);assert.equal(collision.filter(r=>r.status==='fulfilled').length,1);assert.ok(['STORAGE_CONFLICT','STORAGE_UNAVAILABLE','NEEDS_REVIEW'].includes(collision.find(r=>r.status==='rejected').reason.code));
   const winner=collision[0].status==='fulfilled'?concurrentA:concurrentB;await sameSessionOut.enqueue(winner);assert.equal((await sameSessionOut.read()).games.find(x=>x.gameId===total.id).operations.length,4,'CAS race retains one stable score');await parallelAccess.close();out=await verify();
   await rejects(()=>out.enqueue({...score(total,4),command:{action:'undo',expectedVersion:4}}),'INVALID_OPERATION');
+  const badRules={protocolVersion:1,kind:'action',operationId:randomUUID(),gameId:total.id,command:{action:'rules',expectedVersion:4,rules:{name:'Rule edit',winner:'high',endCondition:'manual',roundLimit:'12'}}};await rejects(()=>out.enqueue(badRules),'INVALID_OPERATION');
+  const badHistory=base();badHistory.finishReason='unexpected';await rejects(()=>out.enqueue({protocolVersion:1,kind:'import',operationId:randomUUID(),gameId:badHistory.id,expectedVersion:0,game:badHistory}),'INVALID_OPERATION');
   const extraFields=base();extraFields.players[0].account='unexpected';await rejects(()=>out.enqueue({protocolVersion:1,kind:'import',operationId:randomUUID(),gameId:extraFields.id,expectedVersion:0,game:extraFields}),'INVALID_OPERATION');
   // Lifecycle CAS is checked inside the write transaction, not just before it.
   const independentRepo=await open(),independent=createDurableAccountRepository(independentRepo),saved=await repo.documents.read('game-outbox:A');

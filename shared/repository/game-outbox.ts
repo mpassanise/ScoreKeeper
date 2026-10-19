@@ -18,6 +18,11 @@ function object(value:unknown):Record<string,unknown>{if(!value||typeof value!==
 function fields(value:Record<string,unknown>,allowed:string[]){if(Object.keys(value).some(k=>!allowed.includes(k)))throw invalid()}
 function id(value:unknown){if(typeof value!=='string'||!uuid.test(value)||value==='00000000-0000-0000-0000-000000000000')throw invalid()}
 function version(value:unknown,min:number){if(!Number.isSafeInteger(value)||(value as number)<min||(value as number)>=Number.MAX_SAFE_INTEGER)throw invalid()}
+function wireRules(r:Record<string,unknown>){
+ for(const [key,options]of Object.entries({playStyle:['turns','free'],scoreMode:['add','total'],endCondition:['manual','rounds','target'],targetEnd:['immediate','round']}))if(r[key]!==undefined&&!options.includes(r[key] as string))throw invalid();
+ for(const [key,max]of Object.entries({roundLimit:2147483647,targetScore:Number.MAX_SAFE_INTEGER,presetVersion:2147483647}))if(r[key]!=null&&(!Number.isSafeInteger(r[key])||(r[key] as number)<1||(r[key] as number)>max))throw invalid();
+}
+function date(value:unknown){if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)||!Number.isFinite(Date.parse(value)))throw invalid()}
 const gameFields=['id','name','players','winner','entries','next','finished','version','updated','playStyle','scoreMode','presetId','presetVersion','endCondition','roundLimit','targetScore','targetEnd','finishReason','startedAt','endedAt'];
 /** Deliberately strict subset: canonical lowercase IDs and no device/cache-only fields. */
 export function operationFromWire(wire:string):GameOperation{
@@ -28,9 +33,9 @@ export function operationFromWire(wire:string):GameOperation{
    fields(op,['protocolVersion','kind','operationId','gameId','command']);const c=object(op.command);version(c.expectedVersion,1);
    const allowed:Record<string,string[]>={score:['points','playerId','entryId'],edit:['points','entryId'],undo:['entryId'],select:['playerId'],rules:['rules'],finish:[],resume:[]};
    if(typeof c.action!=='string'||!Object.hasOwn(allowed,c.action))throw invalid();fields(c,['action','expectedVersion',...allowed[c.action]]);
-   for(const key of allowed[c.action]){if(key==='points'){if(!Number.isInteger(c.points)||Math.abs(c.points as number)>100000)throw invalid()}else if(key==='rules'){const r=object(c.rules);fields(r,['name','winner','endCondition','roundLimit','targetScore','targetEnd']);if(typeof r.name!=='string'||!r.name.trim()||r.name.length>60||!['high','low'].includes(r.winner as string)||!['manual','rounds','target'].includes(r.endCondition as string))throw invalid()}else id(c[key])}
+   for(const key of allowed[c.action]){if(key==='points'){if(!Number.isInteger(c.points)||Math.abs(c.points as number)>100000)throw invalid()}else if(key==='rules'){const r=object(c.rules);fields(r,['name','winner','endCondition','roundLimit','targetScore','targetEnd']);wireRules(r);if(typeof r.name!=='string'||!r.name.trim()||r.name.length>60||!['high','low'].includes(r.winner as string)||!['manual','rounds','target'].includes(r.endCondition as string))throw invalid()}else id(c[key])}
   }else if(op.kind==='create'||op.kind==='import'){
-   fields(op,['protocolVersion','kind','operationId','gameId','expectedVersion','game']);if(op.expectedVersion!==0)throw invalid();const g=object(op.game);fields(g,gameFields);
+   fields(op,['protocolVersion','kind','operationId','gameId','expectedVersion','game']);if(op.expectedVersion!==0)throw invalid();const g=object(op.game);fields(g,gameFields);wireRules(g);date(g.updated);for(const key of ['startedAt','endedAt'])if(g[key]!=null)date(g[key]);if(g.finishReason!=null&&!['manual','rounds','target'].includes(g.finishReason as string)||g.endedAt!=null&&g.finished!==true)throw invalid();
    const checked=snapshot('validation',gameView(g as Game)).view.game;id(checked.id);if(checked.id!==op.gameId)throw invalid();for(const p of checked.players){fields(object(p),['id','name']);id(p.id)}for(const e of checked.entries){fields(object(e),['id','playerId','points']);id(e.id)}version(checked.version,1);
    if(!checked.name.trim()||checked.name.length>60||checked.players.some(p=>!p.name.trim()||p.name.length>30)||new Set(checked.players.map(p=>p.name.trim().toLowerCase())).size!==checked.players.length)throw invalid();
    if(op.kind==='create'&&(checked.version!==1||checked.entries.length||checked.finished||checked.endedAt!=null||checked.finishReason!=null||checked.next!==checked.players[0].id))throw invalid();
