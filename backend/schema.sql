@@ -1,4 +1,4 @@
--- Apply once with an administrator identity. App identity needs SELECT, INSERT and UPDATE only.
+-- Apply with an administrator identity. Each feature migration grants its required application permissions.
 IF OBJECT_ID('dbo.Games','U') IS NULL
 BEGIN
 CREATE TABLE dbo.Games (
@@ -19,3 +19,5 @@ END;
 -- For account deletion, also run migrations/002_account_deletion.sql before the updated API.
 
 -- For synced frequent players, run migrations/003_frequent_players.sql before deploying the API.
+
+-- For replay-safe action receipts, run migrations/004_game_operation_receipts.sql; keep the backend feature flag disabled until acceptance.

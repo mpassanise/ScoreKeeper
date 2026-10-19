@@ -1,3 +1,4 @@
+import type {GameOperationCapability} from './game-operation-contract';
 import {applyGameEdit} from './game-edit';
 import type {PlayerChange,PlayerProfile} from './frequent-player-sync';
 import {validateTargetEnding} from './target-ending';
@@ -10,7 +11,7 @@ export type GameView={game:Game;totals:Record<string,number>;winnerIds:string[]}
 export type GameSummary=Pick<Game,"id"|"name"|"players"|"winner"|"finished"|"version"|"updated"|"startedAt"|"endedAt"|"deviceOnly"> & {turnCount:number};
 export type GameRuleEdit={name:string;winner:"high"|"low";endCondition:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
 export type Action={rules?:GameRuleEdit;action:"score"|"edit"|"select"|"undo"|"finish"|"resume"|"rules";points?:number;playerId?:string;entryId?:string};
-export type AccountStatus={gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
+export type AccountStatus={gameOperations?:GameOperationCapability|null;gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string,public requestId?:string){super(message)}}
 function cancelled(){return new ApiError(499,'Connection attempt cancelled.','REQUEST_CANCELLED')}
