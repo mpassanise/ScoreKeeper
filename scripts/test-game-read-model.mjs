@@ -46,6 +46,21 @@ try{
   // Applied-receipt mismatch and terminal rejection both expose review without discarding local work.
   const mismatch=base();await access.observeGame(lease,gameView(mismatch));await out.seedConfirmed(mismatch.id);const m=score(mismatch,1);await out.enqueue(m);await out.prepareDelivery(mismatch.id,cap);await out.acknowledge(m.operationId,ack(m));await rejects(()=>access.observeGame(lease,gameView({...mismatch,version:2})),'NEEDS_REVIEW');assert.equal((await access.readGame(lease,mismatch.id)).sync,'needs-review');
   const conflict=base();await access.observeGame(lease,gameView(conflict));await out.seedConfirmed(conflict.id);const c=score(conflict,1);await out.enqueue(c);await out.prepareDelivery(conflict.id,cap);await out.acknowledge(c.operationId,{...ack(c),outcome:'rejected',committedVersion:null,observedVersion:5,errorCode:'VERSION_CONFLICT'});await access.observeGame(lease,gameView({...conflict,version:5}));assert.equal((await access.readGame(lease,conflict.id)).sync,'needs-review');assert.equal((await access.readGame(lease,conflict.id)).view.game.entries.length,1);
+  // Repeated reads reuse validation, without skipping storage, identity or byte checks.
+  const cachedDocument=await repo.documents.read('game-outbox:A');await repo.documents.write('game-outbox:A',cachedDocument.revision,cachedDocument.value);
+  const parse=JSON.parse;let wireParses=0;
+  JSON.parse=function(text,...rest){if(typeof text==='string'&&text.startsWith('{"protocolVersion":1,'))wireParses++;return parse(text,...rest)};
+  try{
+   const cold=await access.readGame(lease,g.id);assert.ok(wireParses>0,'a new document revision is fully validated');wireParses=0;
+   cold.view.game.entries.length=0;assert.equal((await access.readGame(lease,g.id)).view.game.entries.length,2,'cached views remain detached');
+   await access.readGame(lease,randomUUID());assert.equal(wireParses,0,'tracked and untracked reads do not replay an unchanged validated archive');
+   const readDocument=repo.documents.read;repo.documents.read=async key=>{const value=await readDocument(key);if(key==='game-outbox:A')value.value.games.find(game=>game.gameId===g.id).reservedEntryIds=[];return value};
+   try{await rejects(()=>access.readGame(lease,g.id),'STORAGE_CORRUPT')}finally{repo.documents.read=readDocument}
+   wireParses=0;await access.readGame(lease,g.id);assert.ok(wireParses>0,'corruption evicts the cached result');
+   // Another handle changes the durable revision, even if the payload is identical.
+   const writer=await open(),latest=await writer.documents.read('game-outbox:A');await writer.documents.write('game-outbox:A',latest.revision,latest.value);await writer.close();
+   wireParses=0;await access.readGame(lease,g.id);assert.ok(wireParses>0,'external revisions invalidate the read cache');
+  }finally{JSON.parse=parse}
   // Corrupt queued metadata cannot silently fall back to an older generic cache.
   const document=await repo.documents.read('game-outbox:A');await repo.documents.write('game-outbox:A',document.revision,{...document.value,schemaVersion:99});await rejects(()=>access.readGame(lease,g.id),'STORAGE_CORRUPT');const corrupt=await repo.documents.read('game-outbox:A');await repo.documents.write('game-outbox:A',corrupt.revision,document.value);
   // If tracking starts during an awaited cache read, recheck before returning cache data.

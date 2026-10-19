@@ -5,6 +5,15 @@ import {canonical,checkStored,LocalRepositoryError,snapshot,type ConfirmedSnapsh
 import type {AtomicDocuments,DocumentGuard} from './documents';
 import type {AccountGameRead} from './game-read-model';
 
+// One bounded read-model cache per open repository. Mutable queue/write paths
+// always decode independently; callers never receive references to this cache.
+type ReadCache={profileId:string;guard:DocumentGuard;revision:number;serialized:string;games:Map<string,AccountGameRead>};
+const readCaches=new WeakMap<AtomicDocuments,ReadCache>();
+export function clearGameReadCache(documents:AtomicDocuments,guard?:DocumentGuard){
+ const cached=readCaches.get(documents);
+ if(!guard||cached&&cached.guard.key===guard.key&&cached.guard.revision===guard.revision)readCaches.delete(documents);
+}
+
 export class OutboxError extends Error{
  constructor(readonly code:'INVALID_OPERATION'|'OPERATION_ID_REUSED'|'QUEUE_FULL'|'NEEDS_REVIEW'|'INVALID_ACKNOWLEDGEMENT'|'CAPABILITY_REQUIRED',message:string){super(message);this.name='OutboxError'}
 }
@@ -79,12 +88,12 @@ async function project(op:GameOperation,prior:GameView|null,at:string):Promise<G
 }
 function serverVersion(value:number){if(!Number.isSafeInteger(value)||value<1||value>Number.MAX_SAFE_INTEGER)throw Error()}
 async function validateGame(g:QueuedGame,profileId:string,ids:Set<string>){
- id(g.gameId);if(!Array.isArray(g.reservedEntryIds)||new Set(g.reservedEntryIds).size!==g.reservedEntryIds.length)throw Error();for(const entry of g.reservedEntryIds)id(entry);for(const entry of [...(g.base?.view.game.entries??[]),...(g.projection?.game.entries??[]),...(g.candidate?.view.game.entries??[])])if(!g.reservedEntryIds.includes(entry.id))throw Error();if(g.base!==null)checkStored(g.base,profileId,g.gameId);
+ id(g.gameId);if(!Array.isArray(g.reservedEntryIds))throw Error();const reserved=new Set(g.reservedEntryIds);if(reserved.size!==g.reservedEntryIds.length)throw Error();for(const entry of reserved)id(entry);for(const entry of [...(g.base?.view.game.entries??[]),...(g.projection?.game.entries??[]),...(g.candidate?.view.game.entries??[])])if(!reserved.has(entry.id))throw Error();if(g.base!==null)checkStored(g.base,profileId,g.gameId);
  if(g.candidate!==undefined)checkStored(g.candidate,profileId,g.gameId);
  if(g.tombstone!==undefined){serverVersion(g.tombstone.version);if(g.base!==null||g.projection!==null||g.operations.length||g.candidate!==undefined)throw Error()}
  if(g.projection!==null&&snapshot(profileId,g.projection).gameId!==g.gameId)throw Error();if(!Array.isArray(g.operations))throw Error();
  let v=g.base?.serverVersion??0,stopped=false;let projection=g.base?.view??null;
- for(const item of g.operations){const op=operationFromWire(item.wire);if(op.kind==='action'&&op.command.action==='score'&&!g.reservedEntryIds.includes(op.command.entryId)||op.kind==='import'&&op.game.entries.some(e=>!g.reservedEntryIds.includes(e.id)))throw Error();if(op.gameId!==g.gameId||expected(op)!==v||ids.has(op.operationId)||!['queued','uncertain','applied','rejected'].includes(item.status))throw Error();ids.add(op.operationId);
+ for(const item of g.operations){const op=operationFromWire(item.wire);if(op.kind==='action'&&op.command.action==='score'&&!reserved.has(op.command.entryId)||op.kind==='import'&&op.game.entries.some(e=>!reserved.has(e.id)))throw Error();if(op.gameId!==g.gameId||expected(op)!==v||ids.has(op.operationId)||!['queued','uncertain','applied','rejected'].includes(item.status))throw Error();ids.add(op.operationId);
   if(item.status==='applied'||item.status==='rejected'){if(stopped)throw Error();const ack=validateAck(op,item.acknowledgement);if(ack.outcome!==item.status)throw Error();if(item.status==='rejected')stopped=true}
   else {if(item.acknowledgement!==undefined||item.status==='uncertain'&&stopped)throw Error();stopped=true}
   projection=await project(op,projection,item.localTime);v++;
@@ -93,7 +102,7 @@ async function validateGame(g:QueuedGame,profileId:string,ids:Set<string>){
  if(!g.operations.length&&!g.tombstone&&(!g.base||canonical(g.projection)!==canonical(g.base.view)))throw Error();
  const last=g.operations.at(-1);if(last){const op=operationFromWire(last.wire);if(op.kind==='delete'?g.projection!==null:!g.projection||g.projection.game.version!==v)throw Error()}
 }
-async function decode(value:unknown,profileId:string):Promise<GameOutbox>{
+async function decode(value:unknown,profileId:string,serialized?:string):Promise<GameOutbox>{
  try{
   const raw=value as Omit<GameOutbox,'schemaVersion'>&{schemaVersion:number};
   if(!raw||![1,2].includes(raw.schemaVersion)||raw.profileId!==profileId||!Array.isArray(raw.games)||raw.games.length>50||new Set(raw.games.map(g=>g.gameId)).size!==raw.games.length)throw Error();
@@ -115,7 +124,7 @@ async function decode(value:unknown,profileId:string):Promise<GameOutbox>{
    }else throw Error();
   }
   let active=0;for(const game of state.games){await validateGame(game,profileId,ids);if(game.tombstone&&!state.archive.some(b=>b.gameId===game.gameId&&b.serverVersion===game.tombstone!.version&&(b.kind==='confirmed'&&operationFromWire(b.operations.at(-1)!.wire).kind==='delete'||b.kind==='account-selected'&&b.selected&&'deleted'in b.selected)))throw Error();active+=game.operations.length}
-  if(active>500||retained>10000||utf8Size(JSON.stringify(state))>8_000_000)throw Error();return state;
+  if(active>500||retained>10000||utf8Size(raw.schemaVersion===2&&serialized!==undefined?serialized:JSON.stringify(state))>8_000_000)throw Error();return state;
  }catch{throw new LocalRepositoryError('STORAGE_CORRUPT','Pending game changes could not be validated. They have been kept for recovery.')}
 }
 /** Compare scoring state without server-assigned timestamps or optional wire defaults. */
@@ -125,6 +134,14 @@ function scoringContent(view:GameView){
   roundLimit:g.roundLimit??null,targetScore:g.targetScore??null,presetId:g.presetId??null,presetVersion:g.presetVersion??null,finishReason:g.finishReason??null});
 }
 function contentMismatch(game:QueuedGame){const last=game.operations.at(-1);return !!(last&&game.operations.every(i=>i.status==='applied')&&game.candidate&&game.candidate.serverVersion===last.acknowledgement!.committedVersion&&(!game.projection||scoringContent(game.candidate.view)!==scoringContent(game.projection)))}
+function gameRead(game:QueuedGame):AccountGameRead{
+ if(game.tombstone)return {kind:'deleted',serverVersion:game.tombstone.version};
+ const review=game.operations.some(i=>i.status==='rejected')||contentMismatch(game);
+ const pendingOperations=game.operations.length,serverVersion=game.base?.serverVersion??null;
+ const sync=review?'needs-review':pendingOperations||game.candidate?'pending':'confirmed';
+ if(!game.projection)return {kind:'pending-delete',sync:review?'needs-review':'pending',pendingOperations,serverVersion};
+ return {kind:'game',source:'queue',sync,view:game.projection,pendingOperations,serverVersion};
+}
 function snapshotContent(value:ConfirmedSnapshot){const g=value.view.game;return canonical({profileId:value.profileId,gameId:value.gameId,serverVersion:value.serverVersion,content:scoringContent(value.view),updated:g.updated,startedAt:g.startedAt??null,endedAt:g.endedAt??null})}
 function rejected(game:QueuedGame){return game.operations.find(i=>i.status==='rejected')}
 function reviewOf(game:QueuedGame,revision:number):ConflictReview|null{
@@ -166,13 +183,22 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
   async read(){return (await read()).state},
   /** Null means untracked, not deleted. Never replace a tracked result with cache data. */
   async readGame(gameId:string):Promise<AccountGameRead|null>{
-   const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)return null;
-   if(game.tombstone)return {kind:'deleted',serverVersion:game.tombstone.version};
-   const review=game.operations.some(i=>i.status==='rejected')||contentMismatch(game);
-   const pendingOperations=game.operations.length,serverVersion=game.base?.serverVersion??null;
-   const sync=review?'needs-review':pendingOperations||game.candidate?'pending':'confirmed';
-   if(!game.projection)return {kind:'pending-delete',sync:review?'needs-review':'pending',pendingOperations,serverVersion};
-   return {kind:'game',source:'queue',sync,view:game.projection,pendingOperations,serverVersion};
+   try{
+    const auth=await access.authorize('read'),record=await documents.read('game-outbox:'+auth.profileId);
+    let cached=readCaches.get(documents);
+    if(!record){readCaches.delete(documents);await access.authorize('read');return null}
+    // Check exact bytes as well as revision: even same-revision damaged data
+    // must be revalidated, never masked by a previously valid cached result.
+    const serialized=JSON.stringify(record.value);
+    if(!cached||cached.profileId!==auth.profileId||cached.guard.key!==auth.guard.key||cached.guard.revision!==auth.guard.revision||cached.revision!==record.revision||cached.serialized!==serialized){
+     readCaches.delete(documents);
+     const state=await decode(record.value,auth.profileId,serialized);
+     cached={profileId:auth.profileId,guard:{...auth.guard},revision:record.revision,serialized,games:new Map(state.games.map(game=>[game.gameId,gameRead(game)]))};
+     await access.authorize('read');readCaches.set(documents,cached);
+    }
+    await access.authorize('read');
+    const value=cached.games.get(gameId);return value?JSON.parse(JSON.stringify(value)) as AccountGameRead:null;
+   }catch(error){readCaches.delete(documents);throw error}
   },
   async seedConfirmed(gameId:string){const ctx=await read('write'),copy=await access.readConfirmed(gameId);if(!copy||copy.profileId!==ctx.auth.profileId||copy.gameId!==gameId)throw new OutboxError('NEEDS_REVIEW','A complete confirmed account snapshot is required.');const existing=ctx.state.games.find(g=>g.gameId===copy.gameId);if(existing){if(canonical(existing.base)!==canonical(copy))throw new OutboxError('NEEDS_REVIEW','Existing pending or confirmed data requires review.');return}ctx.state.games.push({gameId:copy.gameId,base:copy,projection:copy.view,operations:[],reservedEntryIds:copy.view.game.entries.map(e=>e.id)});await save(ctx)},
   /** Only complete, account-scoped authenticated GET snapshots belong here; never a list omission/404. */

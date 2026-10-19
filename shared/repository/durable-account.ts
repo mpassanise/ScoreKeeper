@@ -4,7 +4,7 @@ import {LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-gam
 import type {AccountGameRead} from './game-read-model';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
-import {createGameOutbox} from './game-outbox';
+import {clearGameReadCache,createGameOutbox} from './game-outbox';
 import type {AtomicDocuments,DocumentRecord} from './documents';
 type Active={selector:string;profileId:string};
 type Pending={selector:string;expectedProfileId?:string};
@@ -23,6 +23,7 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
 export function createDurableAccountRepository(repository:ConfirmedGames){
  const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
  function stopDeliveries(proof?:DurableLease|VerificationTicket){
+  clearGameReadCache(documents,proof?{key:KEY,revision:proof.revision}:undefined);
   for(const [worker,lease]of deliveries){
    if(!proof||(lease.revision===proof.revision&&lease.selector===proof.selector&&(proof.kind==='verification'||lease.profileId===proof.profileId)))worker.close();
   }
