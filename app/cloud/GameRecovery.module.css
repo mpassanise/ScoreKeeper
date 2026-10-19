@@ -1,0 +1,5 @@
+.dialog button{min-height:44px}.dialog{width:calc(100vw - 2rem);max-width:40rem;max-height:85dvh;overflow-y:auto;color:var(--foreground,#17252a)}
+.copies{display:grid;gap:1rem}.copy{padding:1rem;border:1px solid var(--border,#ccdadd);border-radius:12px;background:var(--card,#fff)}
+.copy h3,.decision h3{font-size:1rem;font-weight:700;margin:0 0 .5rem}.name{font-size:1rem;font-weight:600;margin:0 0 .5rem}.meta{font-size:.875rem;line-height:1.5;color:var(--muted-foreground,#62777d);margin:.5rem 0}
+.scores{display:grid;gap:.5rem;margin:1rem 0}.scores div{display:flex;justify-content:space-between;gap:1rem}.scores dd{margin:0;font-weight:700;font-variant-numeric:tabular-nums}.scores dt{overflow-wrap:anywhere}
+.entries{list-style:decimal;margin:.75rem 0;padding-left:2rem;font-size:.875rem}.entries li{padding:.5rem 0;border-top:1px solid var(--border,#ccdadd)}.entries li strong{float:right;font-variant-numeric:tabular-nums}.decision{border-top:1px solid var(--border,#ccdadd);padding-top:1rem;font-size:.875rem;line-height:1.6}.actions{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1rem}

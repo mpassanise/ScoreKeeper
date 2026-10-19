@@ -161,7 +161,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
   const state:GameOutbox=record?await decode(record.value,auth.profileId):{schemaVersion:2,profileId:auth.profileId,games:[],archive:[]};
   await access.authorize(mode);return {auth,key,mode,revision:record?.revision??0,state};
  }
- async function save(context:Awaited<ReturnType<typeof read>>){await access.authorize(context.mode);const size=utf8Size(JSON.stringify(context.state)),reserve=context.state.games.reduce((n,g)=>n+g.operations.reduce((m,item)=>m+transitionReserve(item),0),0);if(context.state.archive.reduce((n,b)=>n+b.operations.length,0)>10000||context.state.archive.length>10000||context.state.games.length>50||context.state.games.reduce((n,g)=>n+g.operations.length,0)>500||size+reserve>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await decode(context.state,context.auth.profileId);await access.authorize(context.mode);await documents.write(context.key,context.revision,context.state,[context.auth.guard]);await access.authorize(context.mode)}
+ async function save(context:Awaited<ReturnType<typeof read>>,guards:readonly DocumentGuard[]=[]){await access.authorize(context.mode);const size=utf8Size(JSON.stringify(context.state)),reserve=context.state.games.reduce((n,g)=>n+g.operations.reduce((m,item)=>m+transitionReserve(item),0),0);if(context.state.archive.reduce((n,b)=>n+b.operations.length,0)>10000||context.state.archive.length>10000||context.state.games.length>50||context.state.games.reduce((n,g)=>n+g.operations.length,0)>500||size+reserve>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await decode(context.state,context.auth.profileId);await access.authorize(context.mode);await documents.write(context.key,context.revision,context.state,[context.auth.guard,...guards]);await access.authorize(context.mode)}
  async function settle(ctx:Awaited<ReturnType<typeof read>>,game:QueuedGame){
   if(game.tombstone)return 'deleted' as const;
   if(game.operations.some(i=>i.status==='rejected'))return 'needs-review' as const;
@@ -214,8 +214,9 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    await save(ctx);const latest=await read('sync');return settle(latest,latest.state.games.find(g=>g.gameId===game.gameId)!);
   },
   async settle(gameId:string){const ctx=await read('sync'),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)throw new OutboxError('NEEDS_REVIEW','Unknown queued game.');return settle(ctx,game)},
+  async readRecovery(gameId:string){const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);return {state:ctx.state,revision:ctx.revision,conflict:game?reviewOf(game,ctx.revision):null,read:game?gameRead(game):null}},
   async review(gameId:string):Promise<ConflictReview|null>{const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);return game?reviewOf(game,ctx.revision):null},
-  async useAccountVersion(gameId:string,expectedRevision:number,resolutionId:string){
+  async useAccountVersion(gameId:string,expectedRevision:number,resolutionId:string,guards:readonly DocumentGuard[]=[]){
    id(resolutionId);const ctx=await read('sync'),previous=ctx.state.archive.find(b=>b.id===resolutionId);
    if(previous){if(previous.kind!=='account-selected'||previous.gameId!==gameId)throw new OutboxError('OPERATION_ID_REUSED','This review ID belongs to a different decision.');return}
    if(ctx.state.archive.some(b=>b.operations.some(i=>operationFromWire(i.wire).operationId===resolutionId))||ctx.state.games.some(g=>g.operations.some(i=>operationFromWire(i.wire).operationId===resolutionId)))throw new OutboxError('OPERATION_ID_REUSED','Use a new review decision ID, separate from save operations.');
@@ -227,7 +228,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    game.operations=[];delete game.candidate;
    if('deleted'in review.account){game.base=null;game.projection=null;game.tombstone={version:v}}
    else{game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...review.account.view.game.entries.map(e=>e.id)])];game.base=review.account;game.projection=review.account.view}
-   await save(ctx);
+   await save(ctx,guards);
   },
   async enqueue(input:GameOperation){
    // Freeze the exact request before any await; caller changes cannot alter retries.

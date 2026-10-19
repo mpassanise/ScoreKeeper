@@ -1,18 +1,20 @@
 import type {AccountStatus,GameView} from '../api';
 import {AccountAccessError} from './account-access';
 import type {ConfirmedGames} from './confirmed-games';
+import type {GameRecoveryReview} from './game-recovery';
 import {createDurableAccountRepository,type DurableLease,type VerificationTicket} from './durable-account';
 import {stageLegacyGames} from './legacy-staging';
 export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
 /** Gated account read pilot. Observations respect tracked queue state; no live
  * source writer, automatic adoption, delivery or offline scoring is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
  let tail:Promise<unknown>=Promise.resolve();
  const scopes=new WeakSet<object>();
+ const reviews=new WeakMap<object,{scope:ReadScope;lease:DurableLease;gameId:string;revision:number;resolutionId:string}>();
  const stale=()=>new AccountAccessError('STALE_ACCOUNT');
  function invalidateScope(scope:ReadScope){
   if(scopes.has(scope)&&selector===scope.selector&&generation===scope.generation&&!closed){generation++;lease=undefined;proof=undefined;options.onInvalidated()}
@@ -42,6 +44,22 @@ export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<
     if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
     const value=await access.readGame(lease,gameId);valid(scope);return value;
    }catch(error){invalidate(scope,error);throw error}
+  })},
+  readRecovery(scope:ReadScope|null,gameId:string,resolutionId:string){return serial(async()=>{
+   if(!options.enabled||!options.recoveryEnabled)return null;if(!scope)throw stale();valid(scope);
+   const {access}=await repository();valid(scope);
+   try{
+    if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
+    const result=await access.readRecovery(lease,gameId);valid(scope);
+    if(result.review.canChooseAccount&&result.revision!==null)reviews.set(result.review,{scope,lease,gameId,revision:result.revision,resolutionId});
+    return result.review;
+   }catch(error){invalidate(scope,error);throw error}
+  })},
+  chooseAccountRecovery(scope:ReadScope|null,review:GameRecoveryReview){return serial(async()=>{
+   if(!options.enabled||!options.recoveryEnabled||!scope)throw stale();valid(scope);
+   const ticket=reviews.get(review);if(!ticket||ticket.scope!==scope||ticket.lease!==lease)throw stale();
+   const {access}=await repository();valid(scope);
+   try{const read=await access.chooseAccountRecovery(ticket.lease,ticket.gameId,ticket.revision,ticket.resolutionId);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
   recheck(){return serial(async()=>{if(!options.enabled||!selector||!lease||closed)return;const scope=capture()!,previous=lease,{access}=await repository();valid(scope);let restored:DurableLease|null;try{restored=await access.restore(scope.selector)}catch(error){invalidate(scope,error);throw error}valid(scope);
    if(!restored||restored.profileId!==previous.profileId){generation++;lease=undefined;proof=undefined;options.onInvalidated();return}
