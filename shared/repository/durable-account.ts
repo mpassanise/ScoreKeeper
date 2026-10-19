@@ -1,6 +1,7 @@
 import type {AccountStatus,GameView} from '../api';
 import {AccountAccessError} from './account-access';
-import {LocalRepositoryError,type ConfirmedGames} from './confirmed-games';
+import {LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-games';
+import type {AccountGameRead} from './game-read-model';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
 import {createGameOutbox} from './game-outbox';
@@ -61,6 +62,23 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   async beginDeletion(proof:DurableLease){account(proof);stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,proof.profileId])]})},
   connectionUnavailable(proof:DurableLease){account(proof);stopDeliveries(proof);confirmed.delete(proof)},
   async readConfirmed(proof:DurableLease,gameId:string){account(proof);await current(proof);const value=await repository.readConfirmed(proof.profileId,gameId);await current(proof);return value},
+  async readGame(proof:DurableLease,gameId:string):Promise<AccountGameRead>{
+   account(proof);await current(proof);
+   const outbox=api.outbox(proof),tracked=await outbox.readGame(gameId);if(tracked){await current(proof);return tracked}
+   const cached=await repository.readConfirmed(proof.profileId,gameId);await current(proof);
+   // A writer may have started tracking while the generic cache read was pending.
+   const latest=await outbox.readGame(gameId);await current(proof);if(latest)return latest;
+   return cached?{kind:'game',source:'cache',sync:'confirmed',view:cached.view,pendingOperations:0,serverVersion:cached.serverVersion}:{kind:'missing'};
+  },
+  async observeGame(proof:DurableLease,view:GameView):Promise<AccountGameRead>{
+   account(proof);const observed=snapshot(proof.profileId,view);await current(proof);
+   if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   const outbox=api.outbox(proof),tracked=await outbox.readGame(observed.gameId);
+   if(tracked)await outbox.observeSnapshot(observed);
+   else await api.saveConfirmed(proof,[observed.view]);
+   // The queue is authoritative even if tracking began during the cache save.
+   return api.readGame(proof,observed.gameId);
+  },
   async saveConfirmed(proof:DurableLease,views:GameView[]){account(proof);const detached=JSON.parse(JSON.stringify(views)) as GameView[];await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');await repository.saveConfirmed(proof.profileId,detached);await current(proof)},
   outbox(proof:DurableLease){
    account(proof);

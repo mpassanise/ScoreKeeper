@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 3 increment 6 adds an inactive captured-account delivery/reconnect coordinator for both clients, building on increment 5 reconciliation. Live writers, background delivery and all rollout flags remain disabled.
+Status: Phase 3 increment 7 adds queue-aware account reads and gated observation routing for both clients. Live writers, cached projection rendering, background delivery and all rollout flags remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -228,3 +228,12 @@ Next: controlled application integration behind disabled web/iPhone flags, queue
 ### PR #70 architecture review corrections
 
 PR #69 is merged. PR #70 targets main with the merged reconciliation fixes retained. Scoped lifecycle cancellation by durable lease identity so stale account callbacks cannot close newer workers. Registered reconnect promises before status callbacks and isolated known per-game reconciliation review failures so independent games can sync while the affected game retains its receipts, projection and candidates. Authentication, account, protocol and storage errors still stop delivery. Added regression coverage on IndexedDB and desktop SQLite. No live writer is activated; all rollout flags remain disabled, with no API/schema deployment or paid Expo build required.
+
+
+### Phase 3 continuation, increment 7
+
+PR #70 is merged, including architecture review fixes. Added [queue-aware account game reads](QUEUE_AWARE_GAME_READS.md) shared by web IndexedDB and iPhone SQLite. Tracked projections, review state, pending deletions and receipt-backed tombstones take precedence over the generic confirmed cache. Reads do not acknowledge, settle, seed, adopt, mutate or erase anything. Untracked games retain existing confirmed-cache behavior. Authenticated full-game observations in both existing application pilots now reconcile tracked games through the queue and leave the generic cache untouched; no pending projection is promoted to confirmed data.
+
+The read result distinguishes missing, pending deletion, confirmed deletion, confirmed data, pending changes and review-required work. Account scope, durable lifecycle checks and a second queue check after cache I/O prevent cross-account adoption and stale fallback races. Restart recovery stays read-only until fresh verification. Tests exercise both adapters with receipt/snapshot separation, repeated refreshes, deletion suppression, conflict evidence, corrupt metadata, concurrent tracking, disabled inactivity and shared-pilot account isolation.
+
+This is the read boundary/observation-routing increment, not a live scoring UI or writer cutover. Neither app renders these queued projections yet; do not enable the existing cache pilot flags until queue-aware rendering and legacy-write exclusion are integrated and accepted. All backend/client rollout flags stay false. No API/schema deployment or paid Expo build is required. Next integrate the queue-aware result with scoring-screen state and explicit reconnect/conflict recovery, ensure tracked games cannot use legacy writers, then complete authenticated/browser/physical-iPhone/privacy/retention/performance gates before any controlled writer activation.

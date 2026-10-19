@@ -3,6 +3,7 @@ import type {GameOperation,OperationAcknowledgement,OperationError} from '../gam
 import {LocalGames,gameView} from '../local-games';
 import {canonical,checkStored,LocalRepositoryError,snapshot,type ConfirmedSnapshot} from './confirmed-games';
 import type {AtomicDocuments,DocumentGuard} from './documents';
+import type {AccountGameRead} from './game-read-model';
 
 export class OutboxError extends Error{
  constructor(readonly code:'INVALID_OPERATION'|'OPERATION_ID_REUSED'|'QUEUE_FULL'|'NEEDS_REVIEW'|'INVALID_ACKNOWLEDGEMENT'|'CAPABILITY_REQUIRED',message:string){super(message);this.name='OutboxError'}
@@ -163,6 +164,16 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
  }
  return {
   async read(){return (await read()).state},
+  /** Null means untracked, not deleted. Never replace a tracked result with cache data. */
+  async readGame(gameId:string):Promise<AccountGameRead|null>{
+   const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)return null;
+   if(game.tombstone)return {kind:'deleted',serverVersion:game.tombstone.version};
+   const review=game.operations.some(i=>i.status==='rejected')||contentMismatch(game);
+   const pendingOperations=game.operations.length,serverVersion=game.base?.serverVersion??null;
+   const sync=review?'needs-review':pendingOperations||game.candidate?'pending':'confirmed';
+   if(!game.projection)return {kind:'pending-delete',sync:review?'needs-review':'pending',pendingOperations,serverVersion};
+   return {kind:'game',source:'queue',sync,view:game.projection,pendingOperations,serverVersion};
+  },
   async seedConfirmed(gameId:string){const ctx=await read('write'),copy=await access.readConfirmed(gameId);if(!copy||copy.profileId!==ctx.auth.profileId||copy.gameId!==gameId)throw new OutboxError('NEEDS_REVIEW','A complete confirmed account snapshot is required.');const existing=ctx.state.games.find(g=>g.gameId===copy.gameId);if(existing){if(canonical(existing.base)!==canonical(copy))throw new OutboxError('NEEDS_REVIEW','Existing pending or confirmed data requires review.');return}ctx.state.games.push({gameId:copy.gameId,base:copy,projection:copy.view,operations:[],reservedEntryIds:copy.view.game.entries.map(e=>e.id)});await save(ctx)},
   /** Only complete, account-scoped authenticated GET snapshots belong here; never a list omission/404. */
   async observeSnapshot(input:ConfirmedSnapshot){
@@ -233,3 +244,4 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
   }
  };
 }
+
