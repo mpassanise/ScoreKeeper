@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 0/device safety gates remain open. Phase 1 connection recovery and follow-up fixes are published on web. Phase 2 iteration 1 adds an inactive, tested confirmed-snapshot repository.
+Status: Phase 2 shadow repository pilot is merged but disabled; device/activation gates remain open. Phase 3 increment 1 adds an inactive replay-safe action contract and transactional coordinator.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -138,7 +138,7 @@ Proposed performance targets to validate on representative devices: cached usabl
 | 0 | In progress | Iteration 1: [source inventory, safety baseline and proposed ADR contracts](SYNC_BASELINE_AND_CONTRACTS.md). Remaining gates are tracked there. |
 | 1 | In progress | [Connection recovery](CONNECTION_RECOVERY.md): iteration 1 published on web; iteration 2 adds the existing-root MSAL bridge and redacted failure details. Real-session/device acceptance remains open. |
 | 2 | In progress | Iterations 1–4: inactive storage, account access, durable lifecycle metadata and migration staging; see [repository implementation and activation gates](CONFIRMED_REPOSITORY.md). Migration, native adapter and app cutover remain open. |
-| 3 | Not started | Additive replay-safe API. |
+| 3 | In progress | Increment 1: [action operation contract and transactional receipt coordinator](REPLAY_SAFE_GAME_OPERATIONS.md). SQL adapter/routes, creation/import/deletion protocols and capability activation remain open. |
 | 4 | Not started | Local-first pilot. |
 | 5 | Not started | Cross-device recovery and rollout. |
 | 6 | Not started | Performance and scale. |
@@ -177,3 +177,11 @@ The pilot binds a lifecycle revision before dispatching refresh reads. Opaque ge
 See [pilot rollout and acceptance checklist](CONFIRMED_CACHE_PILOT.md). Local automated evidence includes both transactional adapters, disabled-opener behavior, detached GET inputs, account switching, external sign-out, late verification rejection, deletion retry after restart and staged-copy deduplication. Web/mobile typechecks and local iOS bundle export are required, with CI running the new regression suite. No EAS cloud build is requested. Native dependency expo-sqlite is now declared for the next binary; never enable its flag in an existing binary that lacks that module.
 
 Next: run the disabled/enabled pilot on real browsers and a new iPhone development binary; finish full application mutation/account-change acceptance, deletion/tombstone reconciliation, retained-session privacy and legacy frequent-player migration gates before exposing cached account views. Implement an explicit adoption review separately. Then deliver the additive replay-safe API contract (Phase 3) before any account operation queue or offline scoring activation. Flags remain disabled until those gates are deliberately cleared; merge/deployment alone does not enable a pilot.
+
+### Phase 3 continuation, increment 1
+
+PR #64 and Copilot follow-ups are merged. Reviewed the account-action barriers, lifecycle-denial invalidation, failed pending-ticket sign-out retry, profile/game-bound iPhone input recovery, and same-account reconnect barrier recovery. Relevant repository, account-refresh and legacy game tests remain required. Publish the merged web fixes with pilot flags disabled; no API deployment or EAS build is needed merely for this merge.
+
+Started Phase 3 development without advancing Phase 2 acceptance gates or activating any offline account writes. Added a strict v1 action-operation envelope shared by web/iPhone and C#, a stable-entry/commit-time scoring seam, and an inactive transactional receipt coordinator. It fingerprints requests before async work, checks owner/deletion scope, looks up receipts before version checks, reserves historical entry IDs, and returns terminal acknowledgements without game snapshots. The transaction fixture covers concurrent replay, receipt-write rollback and lost acknowledgements; it is not SQL integration evidence. See [protocol, safety boundaries and deployment order](REPLAY_SAFE_GAME_OPERATIONS.md).
+
+Next: real SQL transaction/receipt adapter, additive schema and action endpoint with capability gating; resolve permanent minimal account deletion barriers and receipt retention before activation. Extend stable protocols to creation/import/deletion, then deploy compatible API/schema before enabling any dependent web/iPhone queue. Physical-device and browser pilot acceptance remain open. No routes/capabilities/queues or pilot flags are enabled in this increment.

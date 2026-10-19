@@ -36,13 +36,14 @@ public static class Scoring
   if(!ids.Contains(g.Next)||g.Entries.Length>10000||g.Entries.Any(e=>e is null || e.Id==Guid.Empty||!ids.Contains(e.PlayerId)||Math.Abs((long)e.Points)>1000000)||g.Entries.Select(e=>e.Id).Distinct().Count()!=g.Entries.Length)throw new ArgumentException("Invalid score history or next player.");
   if(g.Players.Any(p=>Total(g,p.Id)>100000))throw new ArgumentException("Player totals cannot exceed 100,000. Enter a smaller score.");
  }
- public static Game Apply(Game g, Command c)
+ public static Game Apply(Game g, Command c,Guid? newEntryId=null,DateTimeOffset? committedAt=null)
  {
   if(c.ExpectedVersion!=g.Version)throw new InvalidOperationException("This game changed on another device. Refresh before scoring.");
   Game changed;
   switch(c.Action)
   {
    case "score":
+    if(newEntryId==Guid.Empty || newEntryId is not null && g.Entries.Any(e=>e.Id==newEntryId))throw new ArgumentException("Score entry ID must be new and nonempty.");
     if(g.Finished)throw new ArgumentException("Resume the game before adding a turn.");
     if(c.Points is null || Math.Abs((long)c.Points.Value)>100000)throw new ArgumentException("Points must be a whole number between -100,000 and 100,000.");
     if(g.Entries.Length>=10000)throw new ArgumentException("Game has reached the turn limit.");
@@ -51,7 +52,7 @@ public static class Scoring
     if(scoringPlayer is null || !g.Players.Any(p=>p.Id==scoringPlayer))throw new ArgumentException("Choose the player receiving this score.");
     if(g.PlayStyle=="turns" && c.PlayerId is not null && c.PlayerId!=g.Next)throw new ArgumentException("Score the selected player's turn.");
     var index=Array.FindIndex(g.Players,p=>p.Id==g.Next);
-    changed=g with{Entries=[..g.Entries,new Entry(Guid.NewGuid(),scoringPlayer.Value,c.Points.Value)],Next=g.PlayStyle=="free"?scoringPlayer.Value:g.Players[(index+1)%g.Players.Length].Id};break;
+    changed=g with{Entries=[..g.Entries,new Entry(newEntryId??Guid.NewGuid(),scoringPlayer.Value,c.Points.Value)],Next=g.PlayStyle=="free"?scoringPlayer.Value:g.Players[(index+1)%g.Players.Length].Id};break;
    case "select":
     if(RemainingTargetPlayers(g) is Player[] selectable && !selectable.Any(p=>p.Id==c.PlayerId))throw new ArgumentException("This player has completed the final round. Score a remaining player.");
     if(g.Finished || !g.Players.Any(p=>p is null || p.Id==c.PlayerId))throw new ArgumentException("Select a player in an active game.");
@@ -68,7 +69,7 @@ public static class Scoring
    default:throw new ArgumentException("Unknown game action.");
   }
   if(c.Action is "score" or "edit" or "undo")changed=AutoEnd(changed);
-  var now=DateTimeOffset.UtcNow;
+  var now=committedAt??DateTimeOffset.UtcNow;
   changed=changed with{Version=g.Version+1,Updated=now,EndedAt=changed.Finished?(g.Finished?g.EndedAt:now):null};Validate(changed);return changed;
  }
  public static Game EditRules(Game g,GameRuleEdit? rules)

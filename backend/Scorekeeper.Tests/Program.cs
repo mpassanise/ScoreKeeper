@@ -1,4 +1,5 @@
 using Scorekeeper.Core;
+await OperationChecks.Run();
 var checks=0;
 void Check(bool value,string name){checks++;if(!value)throw new Exception(name);}
 void Throws<T>(Action action,string name)where T:Exception{try{action();throw new Exception(name);}catch(T){checks++;}}
