@@ -52,7 +52,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   async beginDeletion(proof:DurableLease){account(proof);const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,proof.profileId])]})},
   connectionUnavailable(proof:DurableLease){account(proof);confirmed.delete(proof)},
   async readConfirmed(proof:DurableLease,gameId:string){account(proof);await current(proof);const value=await repository.readConfirmed(proof.profileId,gameId);await current(proof);return value},
-  async saveConfirmed(proof:DurableLease,views:GameView[]){account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');await repository.saveConfirmed(proof.profileId,views);await current(proof)},
+  async saveConfirmed(proof:DurableLease,views:GameView[]){account(proof);const detached=JSON.parse(JSON.stringify(views)) as GameView[];await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');await repository.saveConfirmed(proof.profileId,detached);await current(proof)},
   async close(){closed=true;await repository.close()}
  };
 }
