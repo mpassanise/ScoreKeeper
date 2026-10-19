@@ -15,9 +15,10 @@ async Task Reject<T>(Func<Task> work)where T:Exception{try{await work();throw ne
 async Task Sql(string connection,string sql){await using var c=new SqlConnection(connection);await c.OpenAsync();await using var q=c.CreateCommand();q.CommandText=sql;q.CommandTimeout=60;await q.ExecuteNonQueryAsync();}
 async Task<long> Count(string connection,string table,string owner){await using var c=new SqlConnection(connection);await c.OpenAsync();await using var q=c.CreateCommand();q.CommandText=$"SELECT COUNT_BIG(*) FROM dbo.{table} WHERE OwnerKey=@owner";q.Parameters.Add("@owner",SqlDbType.Char,64).Value=GameStore.OwnerKey(owner);return (long)(await q.ExecuteScalarAsync())!;}
 var dbAdmin=new SqlConnectionStringBuilder(admin.ConnectionString){InitialCatalog=database};
+async Task<bool> CleanupWaitingInTrigger(){await using var c=new SqlConnection(dbAdmin.ConnectionString);await c.OpenAsync();await using var q=c.CreateCommand();q.CommandText="SELECT COUNT(*) FROM sys.dm_exec_requests WHERE database_id=DB_ID() AND wait_type='WAITFOR'";return Convert.ToInt32(await q.ExecuteScalarAsync())>0;}
 var dbApp=new SqlConnectionStringBuilder(dbAdmin.ConnectionString){UserID=login,Password=password,IntegratedSecurity=false};
 GameStore Store(bool enabled=true){Environment.SetEnvironmentVariable("ScorekeeperSql",dbApp.ConnectionString);Environment.SetEnvironmentVariable("ScorekeeperGameOperationsEnabled",enabled?"true":"false");return new(NullLogger<GameStore>.Instance);}
-var migrations=new[]{"backend/schema.sql","backend/migrations/002_account_deletion.sql","backend/migrations/003_frequent_players.sql","backend/migrations/004_game_operation_receipts.sql"};
+var migrations=new[]{"backend/schema.sql","backend/migrations/002_account_deletion.sql","backend/migrations/003_frequent_players.sql","backend/migrations/004_game_operation_receipts.sql","backend/migrations/005_game_lifecycle_operations.sql"};
 // GitHub's SQL container can be starting while the project restores.
 for(var attempt=0;;attempt++){try{await Sql(admin.ConnectionString,"SELECT 1");break;}catch(SqlException)when(attempt<30){await Task.Delay(1000);}}
 try{
@@ -31,13 +32,36 @@ try{
  var op=Guid.NewGuid();var entryId=Guid.NewGuid();var wire=Wire(op,game,entry:entryId);
  Check(await store.OperationCapability() is null,"missing schema never advertises capability");await Reject<GameOperationsUnavailableException>(()=>service.Execute(owner,wire));
  await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[3]));
- Check(await store.OperationCapability() is not null,"enabled installed schema advertises actions");
+ Check(await store.OperationCapability() is null,"schema 004 alone cannot advertise lifecycle support");
+ // Seed an actual v1 receipt before upgrading, including a score subsequently undone by a legacy client.
+ var priorOwner="sql-prior-v1";var priorGame=game with{Id=Guid.NewGuid()};await store.Insert(priorOwner,priorGame);
+ var priorEntry=Guid.NewGuid();var priorOp=Guid.NewGuid();var priorWire=Wire(priorOp,priorGame,entry:priorEntry);
+ var priorAck=new OperationAcknowledgement(priorOp,priorGame.Id,"applied",2,1,null);
+ var priorHash=GameOperationProtocol.Fingerprint(GameOperationProtocol.Parse(priorWire));
+ var scoredPrior=Scoring.Apply(priorGame,new(1,"score",10,priorGame.Next),priorEntry);
+ await store.Replace(priorOwner,scoredPrior,1);await store.Replace(priorOwner,Scoring.Apply(scoredPrior,new(2,"undo")),2);
+ await Sql(dbAdmin.ConnectionString,$"INSERT dbo.GameOperationReceipts(OwnerKey,OperationId,GameId,Fingerprint,Acknowledgement,AddedEntryId) VALUES('{GameStore.OwnerKey(priorOwner)}','{priorOp}','{priorGame.Id}','{priorHash}',N'{JsonSerializer.Serialize(priorAck,GameStore.Json)}','{priorEntry}')");
+ var unicodeOwner="sql-owner-\u00e9-\U0001F3B2";var backfilled=Scoring.Apply(game with{Id=Guid.NewGuid()},new(1,"score",9));await store.Insert(unicodeOwner,backfilled);
+ var migrationRaceOwner="sql-migration-delete-race";var migrationRaceGame=Scoring.Apply(Scoring.Create(Guid.NewGuid(),"Migration race",["One","Two"],"high"),new(1,"score",4));await store.Insert(migrationRaceOwner,migrationRaceGame);
+ await Sql(dbAdmin.ConnectionString,$"INSERT dbo.FrequentPlayers(OwnerId,State,Updated) VALUES(N'{migrationRaceOwner}',N'[]',SYSDATETIMEOFFSET())");await store.BeginDeletion(migrationRaceOwner);
+ await Sql(dbAdmin.ConnectionString,$"CREATE TRIGGER dbo.TestDeletionMigrationRace ON dbo.FrequentPlayers AFTER DELETE AS BEGIN IF EXISTS(SELECT 1 FROM deleted WHERE OwnerId=N'{migrationRaceOwner}') WAITFOR DELAY '00:00:05'; END");
+ var cleanupTask=store.CompleteDeletion(migrationRaceOwner);
+ var cleanupPaused=false;for(var attempt=0;attempt<100&&!cleanupPaused;attempt++){cleanupPaused=await CleanupWaitingInTrigger();if(!cleanupPaused)await Task.Delay(50);}
+ Check(cleanupPaused,"account cleanup reached the migration interleaving point");
+ var migrationTask=Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4]));await Task.WhenAll(cleanupTask,migrationTask);
+ await Sql(dbAdmin.ConnectionString,"DROP TRIGGER dbo.TestDeletionMigrationRace");
+ Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",migrationRaceOwner)==0&&await store.Get(migrationRaceOwner,migrationRaceGame.Id) is null,"schema lock prevents migration backfill from surviving completed account deletion");
+ await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4]));
+ Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",unicodeOwner)==1,"migration backfills identifiers with identical UTF-8 owner hash");
+ Check(await store.OperationCapability() is not null,"enabled installed lifecycle schema advertises operations");
+ Check(priorAck==await service.Execute(priorOwner,priorWire)&&(await store.Get(priorOwner,priorGame.Id))!.Entries.Length==0,"pre-upgrade action receipt still replays after legacy undo without resurrecting score");
+ Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",priorOwner)==1,"migration backfills undone historical receipt entry");
  var off=Store(false);Check(await off.OperationCapability() is null,"flag-off capability remains null after migration");await Reject<GameOperationsUnavailableException>(()=>new GameOperationService(off).Execute(owner,wire));store=Store();service=new(store);
  var first=await service.Execute(owner,wire);var reopened=new GameOperationService(Store());Check(first==await reopened.Execute(owner,wire),"receipt survives fresh store/service instance");
  Check((await store.Get(owner,game.Id))!.Entries.Single().Id==entryId&&await Count(dbAdmin.ConnectionString,"GameOperationReceipts",owner)==1,"stable entry and one durable receipt");
  await Reject<OperationIdReusedException>(()=>service.Execute(owner,Wire(op,game,11,entryId)));
  Check((await store.Get(owner,game.Id))!.Version==2,"changed payload cannot mutate the game");
- await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[3]));Check(first==await service.Execute(owner,wire),"repeated migration preserves receipt and acknowledgement");
+ await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4]));Check(first==await service.Execute(owner,wire),"repeated migration preserves receipt and acknowledgement");
  var concurrentOwner="sql-concurrent";Check(await store.Insert(concurrentOwner,game),"seed concurrent game");
  var values=await Task.WhenAll(Enumerable.Range(0,8).Select(_=>new GameOperationService(Store()).Execute(concurrentOwner,wire)));
  Check(values.All(value=>value==values[0])&&(await store.Get(concurrentOwner,game.Id))!.Entries.Length==1,"independent SQL connections replay concurrently once");
@@ -57,8 +81,39 @@ try{
  await store.BeginDeletion(lostOwner);await Reject<AccountDeletingException>(()=>service.Execute(lostOwner,wire));await Reject<AccountDeletingException>(()=>store.Insert(lostOwner,game with{Id=Guid.NewGuid()}));
  await store.CompleteDeletion(lostOwner);Check(await Count(dbAdmin.ConnectionString,"GameOperationReceipts",lostOwner)==0,"account completion removes receipts");
  await Sql(dbAdmin.ConnectionString,"UPDATE dbo.AccountDeletions SET CompletedAt=DATEADD(day,-100,SYSDATETIMEOFFSET()) WHERE Status='completed'");Check(await store.DeletionState(lostOwner)=="completed","completed deletion marker does not expire");await Reject<AccountDeletingException>(()=>service.Execute(lostOwner,wire));
+ string Life(string kind,Guid id,Game? value,long expected=0,Guid? operation=null)=>JsonSerializer.Serialize(new LifecycleOperation(1,kind,operation??Guid.NewGuid(),id,expected,value),GameStore.Json);
+ var lifeOwner="sql-lifecycle";var fresh=game with{Id=Guid.NewGuid()};var create=Life("create",fresh.Id,fresh);
+ await Reject<IOException>(()=>new GameOperationService(new LostResponse(Store())).Execute(lifeOwner,create));var created=await service.Execute(lifeOwner,create);
+ Check(created.Outcome=="applied"&&created.CommittedVersion==1&&created.ObservedVersion is null&&(await store.Get(lifeOwner,fresh.Id))!.Players.SequenceEqual(fresh.Players),"lost create response preserves stable player and game IDs");
+ Check((await service.Execute(lifeOwner,Life("create",fresh.Id,fresh))).ErrorCode=="GAME_ALREADY_EXISTS","new operation never adopts an existing ID");
+ var raced=fresh with{Id=Guid.NewGuid()};var races=await Task.WhenAll(Enumerable.Range(0,8).Select(_=>new GameOperationService(Store()).Execute(lifeOwner,Life("create",raced.Id,raced))));
+ Check(races.Count(a=>a.Outcome=="applied")==1&&races.Count(a=>a.ErrorCode=="GAME_ALREADY_EXISTS")==7,"different concurrent create operations create exactly one game");
+ var history=Scoring.Apply(fresh with{Id=Guid.NewGuid()},new(1,"score",17));var import=Life("import",history.Id,history);
+ await Reject<IOException>(()=>new GameOperationService(new LostResponse(Store())).Execute(lifeOwner,import));var importedAck=await service.Execute(lifeOwner,import);var imported=(await store.Get(lifeOwner,history.Id))!;
+ Check(imported.Version==1&&imported.Entries.SequenceEqual(history.Entries)&&importedAck.Outcome=="applied","lost import response retains history IDs with server version one");
+ Check(await store.Replace(lifeOwner,Scoring.Apply(imported,new(1,"undo")),1),"legacy undo of imported entry");imported=(await store.Get(lifeOwner,history.Id))!;
+ Check((await service.Execute(lifeOwner,Wire(Guid.NewGuid(),imported,entry:history.Entries[0].Id))).ErrorCode=="ENTRY_ID_REUSED","import reservation survives legacy undo");
+ var deletion=Life("delete",fresh.Id,null,1);
+ Check((await service.Execute(lifeOwner,Life("delete",fresh.Id,null,2))).ErrorCode=="VERSION_CONFLICT","stale delete rejected");
+ await Sql(dbAdmin.ConnectionString,"CREATE TRIGGER dbo.TestLifecycleFailure ON dbo.GameOperationReceipts AFTER INSERT AS THROW 51010,'injected lifecycle receipt failure',1;");
+ await Reject<SqlException>(()=>service.Execute(lifeOwner,deletion));Check(await store.Get(lifeOwner,fresh.Id) is not null,"delete receipt failure rolls back tombstone");
+ var rolledBack=fresh with{Id=Guid.NewGuid()};var rolledBackWire=Life("import",rolledBack.Id,Scoring.Apply(rolledBack,new(1,"score",2)));
+ var reservationsBefore=await Count(dbAdmin.ConnectionString,"GameEntryReservations",lifeOwner);
+ await Reject<SqlException>(()=>service.Execute(lifeOwner,rolledBackWire));Check(await store.Get(lifeOwner,rolledBack.Id) is null&&await Count(dbAdmin.ConnectionString,"GameEntryReservations",lifeOwner)==reservationsBefore,"failed import rolls back game and reservations");
+ await Sql(dbAdmin.ConnectionString,"DROP TRIGGER dbo.TestLifecycleFailure");
+ await Reject<IOException>(()=>new GameOperationService(new LostResponse(Store())).Execute(lifeOwner,deletion));var removed=await service.Execute(lifeOwner,deletion);
+ Check(removed.Outcome=="applied"&&await store.Get(lifeOwner,fresh.Id) is null&&created==await service.Execute(lifeOwner,create),"lost deletion response recovers; old create receipt cannot resurrect game");
+ var cancelled=fresh with{Id=Guid.NewGuid()};await service.Execute(lifeOwner,Life("delete",cancelled.Id,null));
+ Check((await service.Execute(lifeOwner,Life("import",cancelled.Id,cancelled))).ErrorCode=="GAME_DELETED","tombstone before delayed import prevents resurrection");
+ var finished=Scoring.Apply(fresh with{Id=Guid.NewGuid()},new(1,"finish"));await service.Execute(lifeOwner,Life("import",finished.Id,finished));
+ Check((await service.Execute(lifeOwner,Life("delete",finished.Id,null,1))).ErrorCode=="GAME_FINISHED","completed games cannot be deleted");
+ await Reject<OperationIdReusedException>(()=>service.Execute(lifeOwner,Life("delete",fresh.Id,null,1,created.OperationId)));
+ await store.BeginDeletion(lifeOwner);await Reject<AccountDeletingException>(()=>service.Execute(lifeOwner,create));await store.CompleteDeletion(lifeOwner);
+ Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",lifeOwner)==0&&await Count(dbAdmin.ConnectionString,"GameOperationReceipts",lifeOwner)==0,"account deletion purges lifecycle reservations and receipts");
+ // Re-running 004 after the version advance must fail, without erasing receipts.
+ await Reject<SqlException>(()=>Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[3])));
  await Sql(dbAdmin.ConnectionString,"UPDATE dbo.GameOperationSchema SET Version=99");Check(await store.OperationCapability() is null,"unknown schema fails closed");await Reject<GameOperationsUnavailableException>(()=>service.Execute(owner,wire));
- await Reject<SqlException>(()=>Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[3])));await Sql(dbAdmin.ConnectionString,"UPDATE dbo.GameOperationSchema SET Version=1");Check(first==await service.Execute(owner,wire),"failed migration preserves historical receipt");
+ await Reject<SqlException>(()=>Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4])));await Sql(dbAdmin.ConnectionString,"UPDATE dbo.GameOperationSchema SET Version=2");Check(first==await service.Execute(owner,wire),"failed migration preserves historical receipt");
  Console.WriteLine($"{checks} real SQL operation integration checks passed using the application database user.");
 }finally{
  SqlConnection.ClearAllPools();await Sql(admin.ConnectionString,$"IF DB_ID('{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END; IF EXISTS(SELECT 1 FROM sys.sql_logins WHERE name='{login}') DROP LOGIN [{login}];");

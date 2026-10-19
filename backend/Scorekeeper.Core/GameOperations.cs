@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 namespace Scorekeeper.Core;
 
-// Inactive protocol foundation. No HTTP route or capability is enabled here.
+// The API capability remains gated; clients must not infer support from these types.
 public sealed record ActionOperation(int ProtocolVersion,string Kind,Guid OperationId,Guid GameId,Command Command);
 public sealed record OperationAcknowledgement(Guid OperationId,Guid GameId,string Outcome,long? CommittedVersion,long? ObservedVersion,string? ErrorCode);
 public sealed record OperationReceipt(Guid OperationId,Guid GameId,string Fingerprint,OperationAcknowledgement Acknowledgement,Guid? AddedEntryId);
@@ -26,6 +26,8 @@ public interface IGameOperationTransaction
  // Includes current legacy entries and successful historical receipts, even after undo.
  Task<bool> EntryIdUsed(Guid gameId,Guid entryId);
  Task WriteGame(Game game,long expectedVersion);
+ Task InsertGame(Game game);
+ Task WriteTombstone(Guid gameId,long expectedVersion,DateTimeOffset updated);
  Task WriteReceipt(OperationReceipt receipt);
 }
 
@@ -69,6 +71,7 @@ public sealed class GameOperationService(IGameOperationStore store,TimeProvider?
  public Task<OperationAcknowledgement> Execute(string authenticatedOwner,string json)
  {
   if(string.IsNullOrWhiteSpace(authenticatedOwner))throw new UnauthorizedAccessException();
+  if(GameLifecycleProtocol.Kind(json)!="action")return new GameLifecycleService(store,time).Execute(authenticatedOwner,json);
   // Parse/detach and hash before entering any asynchronous storage work.
   var operation=GameOperationProtocol.Parse(json);var hash=GameOperationProtocol.Fingerprint(operation);
   return store.Transaction(authenticatedOwner,async tx=>{
