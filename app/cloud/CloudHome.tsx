@@ -104,12 +104,15 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
    const readApi=new ScorekeeperApi(cloudConfig.api||"http://localhost:7071/api",()=>step('authentication',token),{signal,readAttempts:1});
    const selected=currentContext.view&&!currentContext.view.game.deviceOnly?currentContext.view.game.id:(!currentContext.view&&draft?.identity===owner?draft.gameId:undefined);
    const scope=await preparePilot(owner);if(!valid())return;
-   const [saved,status,latest]=await Promise.all([step('games',()=>readApi.list()),step('account',()=>readApi.account()),selected?(draft?.deviceOnly&&!currentContext.view?step('device',()=>localApi.get(selected)):step('game',()=>readApi.get(selected))):Promise.resolve(null)]);
+   const status=await step('account',()=>readApi.account());
    if(!valid())return;
-   if(status.deletionStatus)throw new Error('Account deletion is pending. Sync is unavailable.');
    if((await auth()).getActiveAccount()?.homeAccountId!==owner){identity.current=null;connection.reset(null);return}
    if(!valid())return;
-   if(pilot.ref.current&&scope){try{await pilot.ref.current.verify(scope,status);if(latest&&!latest.game.deviceOnly)await rememberRead(scope,latest)}catch{setNotice('Could not prepare device storage. Account games remain online-only.');}if(!valid())return;}
+   if(pilot.ref.current&&scope){try{await pilot.ref.current.verify(scope,status)}catch{setNotice('Could not prepare device storage. Account games remain online-only.');}if(!valid())return;}
+   if(status.deletionStatus)throw new Error('Account deletion is pending. Sync is unavailable.');
+   const [saved,latest]=await Promise.all([step('games',()=>readApi.list()),selected?(draft?.deviceOnly&&!currentContext.view?step('device',()=>localApi.get(selected)):step('game',()=>readApi.get(selected))):Promise.resolve(null)]);
+   if(!valid())return;
+   if(pilot.ref.current&&scope&&latest&&!latest.game.deviceOnly)await rememberRead(scope,latest);
    setRulesEnabled((status.scoringRulesVersion||0)>=2);
    const locals=await step('device',()=>localApi.list());if(!valid())return;
    if(revision===activity.current){
@@ -121,7 +124,7 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
    }
    void listCache.write(owner,saved).catch(()=>{});
    if(status.profileId){await step('players',()=>setFrequentPlayersAccount(status.profileId!,cloudApi));if(!valid())return;await step('players',()=>syncFrequentPlayers())}
-   const pending=await step('imports',()=>pendingImports(localApi,readApi,saved));if(!valid())return;setLocalCount(pending.length);
+   const pending=await step('imports',()=>pendingImports(localApi,readApi,saved,valid));if(!valid())return;setLocalCount(pending.length);
    const user=(await auth()).getActiveAccount();if(valid()&&user?.homeAccountId===owner&&status.profileId)try{localStorage.setItem('scorekeeper-player-profile:'+owner,status.profileId)}catch{}
   });
  }

@@ -161,13 +161,18 @@ function Scorekeeper(){
   try{return await connection.connect(async(isCurrent,signal,step)=>{
    const valid=()=>mounted.current&&isCurrent()&&!!current.current&&identity===identityRevision.current&&!accountBarrier.current;
    const readApi=new ScorekeeperApi(apiUrl||'http://localhost:7071/api',()=>step('authentication',()=>latestToken.current()),{signal,readAttempts:2});
-   const pilotScope=current.current?.profileId?await preparePilot('native-profile:'+current.current.profileId):null;if(!valid())return;
+   let pilotScope=current.current?.profileId?await preparePilot('native-profile:'+current.current.profileId):null;let pilotVerified=false;if(!valid())return;
    const recovery=recoveryDraft.current;
    const selectedGame=context.view&&!context.view.game.deviceOnly?context.view.game.id:(!context.view&&recovery&&recovery.profileId===current.current?.profileId?recovery.gameId:undefined);
-   const snapshot=await readAccountSnapshot({api:readApi,expectedProfileId:current.current?.profileId,gameId:selectedGame,isCurrent:valid,step});
+   const snapshot=await readAccountSnapshot({api:readApi,expectedProfileId:current.current?.profileId,gameId:selectedGame,isCurrent:valid,step,onAccountStatus:async status=>{
+    if(!pilot.ref.current||!status.profileId)return;
+    const scope=pilotScope??(!current.current?.profileId?await preparePilot('native-profile:'+status.profileId):null);
+    if(!valid())return;
+    if(scope){pilotScope=scope;try{await pilot.ref.current.verify(scope,status);pilotVerified=true}catch{setNotice('Could not prepare device storage. Account games remain online-only.');}}
+   }});
    if(!snapshot||!valid())return;
    const {saved,status,latest}=snapshot;
-   if(pilot.ref.current&&status.profileId){const scope=pilotScope??(!current.current?.profileId?await preparePilot('native-profile:'+status.profileId):null);if(!valid())return;try{if(scope)await pilot.ref.current.verify(scope,status);if(scope&&latest)await rememberRead(scope,latest)}catch{setNotice('Could not prepare device storage. Account games remain online-only.');}if(!valid())return;}
+   if(pilot.ref.current&&status.profileId){const scope=pilotScope??(!current.current?.profileId?await preparePilot('native-profile:'+status.profileId):null);if(!valid())return;try{if(scope&&!pilotVerified)await pilot.ref.current.verify(scope,status);if(scope&&latest)await rememberRead(scope,latest)}catch{setNotice('Could not prepare device storage. Account games remain online-only.');}if(!valid())return;}
    setRulesEnabled((status.scoringRulesVersion||0)>=2);
    const locals=await step('device',()=>localApi.list());if(!valid())return;
    if(revision===activityRevision.current){
@@ -189,7 +194,7 @@ function Scorekeeper(){
    if(!valid())return;
    void gameListCache.write(current.current?.profileId,saved).catch(()=>{});
    // Import remains explicit. Refresh only discovers candidates.
-   const pending=await step('imports',()=>pendingImports(localApi,readApi,saved));
+   const pending=await step('imports',()=>pendingImports(localApi,readApi,saved,valid));
    if(!valid())return;
    const eligible=pending.filter(g=>((status.scoringRulesVersion||0)>=2||!needsAdvancedRules(g,g.winner))&&(g.targetEnd!=='round'||(status.scoringRulesVersion||0)>=3));
    setLocalCount(eligible.length);setBlockedLocalCount(pending.length-eligible.length);
