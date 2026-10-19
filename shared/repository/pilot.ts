@@ -5,7 +5,8 @@ import {createDurableAccountRepository,type DurableLease,type VerificationTicket
 import {stageLegacyGames} from './legacy-staging';
 export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
-/** Shadow read cache only. No API, source-storage writer, queue or offline scoring path. */
+/** Gated account read pilot. Observations respect tracked queue state; no live
+ * source writer, automatic adoption, delivery or offline scoring is activated. */
 export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
@@ -33,7 +34,12 @@ export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<
    try{lease=await access.verify(proof,status)}catch(error){invalidate(scope,error);throw error}
    proof=lease;valid(scope);options.publish?.();
   })},
-  record(scope:ReadScope|null,view:GameView){const detached=JSON.parse(JSON.stringify(view)) as GameView;return serial(async()=>{if(!options.enabled)return;if(!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const {access}=await repository();valid(scope);await access.saveConfirmed(lease,[detached]);valid(scope)})},
+  record(scope:ReadScope|null,view:GameView){const detached=JSON.parse(JSON.stringify(view)) as GameView;return serial(async()=>{if(!options.enabled)return;if(!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const {access}=await repository();valid(scope);await access.observeGame(lease,detached);valid(scope)})},
+  readGame(scope:ReadScope|null,gameId:string){return serial(async()=>{
+   if(!options.enabled)return null;if(!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');
+   const {access}=await repository();valid(scope);
+   try{const value=await access.readGame(lease,gameId);valid(scope);return value}catch(error){invalidate(scope,error);throw error}
+  })},
   recheck(){return serial(async()=>{if(!options.enabled||!selector||!lease||closed)return;const scope=capture()!,previous=lease,{access}=await repository();valid(scope);let restored:DurableLease|null;try{restored=await access.restore(scope.selector)}catch(error){invalidate(scope,error);throw error}valid(scope);
    if(!restored||restored.profileId!==previous.profileId){generation++;lease=undefined;proof=undefined;options.onInvalidated();return}
    // An external re-verification revokes writable permission until our next API verification.
