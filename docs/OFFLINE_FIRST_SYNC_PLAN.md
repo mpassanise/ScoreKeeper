@@ -1,6 +1,6 @@
 # Offline-first scoring and resilient account sync
 
-Updated: 2026-10-16
+Updated: 2026-10-19
 Status: Phase 0/device safety gates remain open. Phase 1 connection recovery and follow-up fixes are published on web. Phase 2 iteration 1 adds an inactive, tested confirmed-snapshot repository.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
@@ -167,3 +167,13 @@ Added a shared account-access guard and guarded web/native repository entry poin
 ### Phase 2 continuation, iteration 4
 
 Added schema 2 transactional metadata to IndexedDB and SQLite, retaining v1 confirmed snapshots. Canonical platform repository entry points now use durable verified-session leases, persistent sign-out/deletion blocks, revision checks across independent handles, and read-only offline restore. Source staging atomically retains exact legacy bytes plus an inspected manifest; repeat/lost-ack retries do not duplicate copies, changed/malformed/duplicate-ID sources remain for review. Staging is not account adoption, confirmed sync or live migration. Both apps remain on their existing writers/storage until controlled cutover. Tests cover aborted upgrade/retry, preservation, reopen, CAS races, durable lifecycle, quota failure, lost local acknowledgements and corruption against both adapters. See [durable metadata and migration staging](DURABLE_REPOSITORY_METADATA.md). Next: bind the durable protocol to app auth/lifecycle, browser-tab invalidation and an explicit migration/adoption flow behind a disabled rollout flag; finish native dependency/device acceptance before enabling caching. Replay-safe API and offline account writes remain later gates.
+
+### Phase 2 continuation, iteration 5
+
+PR #63 merged. Both application shells now import a shared shadow confirmed-read pilot, gated by separate build-time flags that default to false. The web hook opens IndexedDB only when enabled; iPhone dynamically loads expo-sqlite only inside the enabled opener. Only full authenticated GET results are copied after API profile verification; guest sources, summaries and mutation requests are not redirected into this repository. Cached records are not yet opened by the scoring UI. Existing score writers, legacy source keys and summary rendering continue unchanged.
+
+The pilot binds a lifecycle revision before dispatching refresh reads. Opaque generation-scoped read captures reject late account responses after switching/sign-out. Browser BroadcastChannel/storage notifications carry no identity or game data; focus and native resume recheck the durable binding. Sign-out/deletion hide account views and must persist the local access block before completing sign-out or sending deletion. Deletion retries check the durable profile block without restoring access. Explicit device-save review, gated separately, stages exact bytes and reports validation/review only; it does not adopt, upload or remove anything.
+
+See [pilot rollout and acceptance checklist](CONFIRMED_CACHE_PILOT.md). Local automated evidence includes both transactional adapters, disabled-opener behavior, detached GET inputs, account switching, external sign-out, late verification rejection, deletion retry after restart and staged-copy deduplication. Web/mobile typechecks and local iOS bundle export are required, with CI running the new regression suite. No EAS cloud build is requested. Native dependency expo-sqlite is now declared for the next binary; never enable its flag in an existing binary that lacks that module.
+
+Next: run the disabled/enabled pilot on real browsers and a new iPhone development binary; finish full application mutation/account-change acceptance, deletion/tombstone reconciliation, retained-session privacy and legacy frequent-player migration gates before exposing cached account views. Implement an explicit adoption review separately. Then deliver the additive replay-safe API contract (Phase 3) before any account operation queue or offline scoring activation. Flags remain disabled until those gates are deliberately cleared; merge/deployment alone does not enable a pilot.
