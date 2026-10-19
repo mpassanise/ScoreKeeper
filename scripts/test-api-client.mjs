@@ -128,3 +128,21 @@ editRequests.length=0;
 globalThis.fetch=async(url,options)=>{editRequests.push({url,options});return{ok:true,json:async()=>({})}};
 await assert.rejects(()=>api.act(editGame,editAction),/latest API deployment/);assert.equal(editRequests.length,1,'old API receives no unsupported write');
 console.log('Game editing API contract and capability rollout passed.');
+
+// The screen pilot is enforced at the transport boundary, beyond disabled UI controls.
+{
+ let tokens=0,requests=0;const previousFetch=globalThis.fetch;
+ const readOnly=new ScorekeeperApi('https://api.example.test/api',async()=>{tokens++;return 'captured-token'},{readOnlyGames:true});
+ globalThis.fetch=async()=>{requests++;return {ok:true,json:async()=>({profileId:'A',game:{id:'game'}})}};
+ try{
+  const denied=e=>e instanceof ApiError&&e.status===423&&e.code==='ACCOUNT_GAME_READ_ONLY';
+  await assert.rejects(async()=>readOnly.create('new','Game',['One','Two'],'high',{endCondition:'target',targetScore:100,targetEnd:'round'}),denied);
+  for(const action of ['score','edit','select','undo','finish','resume','rules'])await assert.rejects(async()=>readOnly.act(game,{action,points:0}),denied);
+  await assert.rejects(()=>readOnly.deleteGame(game),denied);
+  await assert.rejects(async()=>readOnly.import(game),denied);
+  await assert.rejects(async()=>readOnly.operation(JSON.stringify({protocolVersion:1,kind:'action'})),denied);
+  assert.equal(tokens,0,'blocked writes do not start token acquisition or capability reads');assert.equal(requests,0);
+  await readOnly.account();await readOnly.get('game');await readOnly.list();await readOnly.syncFrequentPlayers('A',[]);assert.equal(requests,4,'reads and frequent-player sync remain available');
+ }finally{globalThis.fetch=previousFetch}
+ console.log('Read-only account screen policy: all game writes blocked before authentication; reads and player sync remain available.');
+}

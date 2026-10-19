@@ -1,0 +1,33 @@
+import type {GameView} from '../api';
+import {LocalRepositoryError} from './confirmed-games';
+import type {AccountGameRead} from './game-read-model';
+import type {ReadScope,RepositoryPilot} from './pilot';
+
+/** Never expose a raw GET in place of a tracked projection or deletion marker. */
+export async function observeGameScreen(pilot:RepositoryPilot,scope:ReadScope|null,gameId:string,view:GameView):Promise<AccountGameRead>{
+ if(view.game.id!==gameId)throw new LocalRepositoryError('INVALID_SNAPSHOT','The account response belongs to a different game.');
+ try{await pilot.record(scope,view)}catch(error){
+  const code=(error as {code?:string})?.code;
+  if(code!=='NEEDS_REVIEW'&&code!=='VERSION_COLLISION')throw error;
+  const retained=await pilot.readGame(scope,gameId);
+  if(retained?.kind==='game'||retained?.kind==='pending-delete')return {...retained,sync:'needs-review'};
+  if(retained?.kind==='deleted')return retained;
+  throw error;
+ }
+ const result=await pilot.readGame(scope,gameId);
+ if(!result||result.kind==='missing')throw new LocalRepositoryError('STORAGE_UNAVAILABLE','The saved game could not be read. Existing copies have been kept.');
+ return result;
+}
+export async function openGameScreen(pilot:RepositoryPilot,scope:ReadScope|null,gameId:string,fetchGame:()=>Promise<GameView>):Promise<AccountGameRead>{
+ const retained=await pilot.readGame(scope,gameId);
+ if(!retained)throw new LocalRepositoryError('STORAGE_UNAVAILABLE','Saved game access is unavailable.');
+ if(retained.kind!=='missing')return retained;
+ return observeGameScreen(pilot,scope,gameId,await fetchGame());
+}
+export function gameScreenMessage(read:AccountGameRead|null):{title:string;detail:string}{
+ if(read?.kind==='deleted')return {title:'Game deleted',detail:'The confirmed deletion is saved on this device.'};
+ if(read?.kind==='pending-delete')return {title:read.sync==='needs-review'?'Deletion needs review':'Deletion pending',detail:'This game stays hidden while its account deletion is unresolved. Your saved changes have been kept.'};
+ if(read?.kind==='game'&&read.sync==='needs-review')return {title:'Saved changes need review',detail:'Your device changes have been kept. Account-game editing is paused while these differences are unresolved.'};
+ if(read?.kind==='game'&&read.sync==='pending')return {title:'Changes saved on this device',detail:'Account confirmation is pending. You can review these scores while reconnecting.'};
+ return {title:'Saved copy · view only',detail:'You can review this account game. Start a new game to keep score on this device.'};
+}

@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 3 increment 7 adds queue-aware account reads and gated observation routing for both clients. Live writers, cached projection rendering, background delivery and all rollout flags remain disabled.
+Status: Phase 3 increment 8 adds separately disabled read-only account scoring screens for web/iPhone, with API-enforced game-write exclusion. Production flags, replay and live queue writers remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -242,3 +242,12 @@ This is the read boundary/observation-routing increment, not a live scoring UI o
 ### PR #71 performance review correction
 
 Optimized growing entry-ID reservation validation with sets and added a bounded, account/lifecycle/revision/exact-content-checked read-model cache. Both web and iPhone retain durable reads and authorization checks on every read, and all write/CAS paths still validate independently. Same-revision corrupted content fails closed; external revisions invalidate cached validation; returned views are detached. Added deterministic regression coverage and a reproducible 9,000-operation/7.7 MB benchmark for both adapters. Existing single-document I/O/serialization and physical-device/memory performance acceptance remain open. Rollout flags stay disabled; no API/schema deployment or paid Expo build is required.
+
+
+### Phase 3 continuation, increment 8
+
+PR #71 is merged, including the large-history performance correction. Added the [read-only account screen pilot](ACCOUNT_GAME_SCREEN_PILOT.md) behind separate default-false web/iPhone flags requiring their existing repository pilots. Retained queue/cache views can open without waiting for a GET; cold-start durable restore grants read access only. Online observations and conflict-refresh results resolve through authoritative queue state, with explicit pending/review/deletion messages instead of raw-response replacement. Both clients retain current account/activity guards and suppress selected pending/confirmed deletions.
+
+The pilot excludes all account game writes at the API boundary, not just UI controls or a racy per-game check. Account scoring/rules/finish/resume/delete/import and replay POSTs cannot bypass it. New signed-in games are created explicitly on this device and remain playable; guest/device-only writers continue unchanged. Account read/player sync/deletion behavior remains available. No automatic import scan, queued writer, replay worker, adoption or conflict choice is activated.
+
+Shared adapter and API tests cover cache-first opens, wrong-game responses, retained mismatch/deletion states, read-only cold restore, stale scopes and game writes blocked before credentials/preflight calls. Keep all client/backend flags off. No API/schema deployment or paid Expo build is needed for this merge. Browser/physical-iPhone screen/accessibility/large-history acceptance, queue-aware home summaries, explicit conflict/recovery choices, captured-token delivery, source adoption and privacy/retention/erasure gates remain open. Next add the explicit recovery UI and manual delivery integration, then the remaining summary/writer/adoption gates before controlled activation.

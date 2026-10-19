@@ -23,7 +23,8 @@ async function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T>{
  finally{signal.removeEventListener('abort',abort)}
 }
 export class ScorekeeperApi{
- constructor(private base:string,private token:()=>Promise<string>,private options:{signal?:AbortSignal;readAttempts?:number}={}){if(!/^https:\/\//.test(base)&&!/^http:\/\/localhost(?::\d+)?(?:\/|$)/.test(base))throw new Error("Use HTTPS for the API.")}
+ constructor(private base:string,private token:()=>Promise<string>,private options:{signal?:AbortSignal;readAttempts?:number;readOnlyGames?:boolean}={}){if(!/^https:\/\//.test(base)&&!/^http:\/\/localhost(?::\d+)?(?:\/|$)/.test(base))throw new Error("Use HTTPS for the API.")}
+ private requireGameWrites(){if(this.options.readOnlyGames)throw new ApiError(423,'This account game is view-only. Start a new game to keep score on this device.','ACCOUNT_GAME_READ_ONLY')}
  // Token acquisition and API I/O have separate budgets. A cold Function/SQL
  // connection must not lose its entire budget to a silent token refresh.
  private async accessToken(){
@@ -31,6 +32,7 @@ export class ScorekeeperApi{
   try{return await Promise.race([this.token(),new Promise<string>((_,reject)=>{timer=setTimeout(()=>reject(new ApiError(408,'Sign-in token refresh timed out. Use Reconnect to try again.')),30000)})])}finally{clearTimeout(timer!)}
  }
  private async request<T>(path:string,body?:unknown,rawJson=false):Promise<T>{
+  if(body!==undefined&&(/^\/games(?:\/|$)/.test(path)||path==='/game-operations'))this.requireGameWrites();
   const signal=this.options.signal;if(signal?.aborted)throw cancelled();
   const accessToken=await abortable(this.accessToken(),signal),read=body===undefined;
   const attempts=read?Math.max(1,Math.min(3,this.options.readAttempts??3)):1;
@@ -69,8 +71,8 @@ export class ScorekeeperApi{
  deleteAccount(confirmation:string){return this.request<AccountDeletion>("/account/delete",{confirmation})}
  list(){return this.request<GameSummary[]>("/games")}
  get(id:string){return this.request<GameView>(`/games/${encodeURIComponent(id)}`)}
- async deleteGame(game:Pick<Game,'id'|'version'>){try{return await this.request<{deleted:boolean}>(`/games/${encodeURIComponent(game.id)}/delete`,{expectedVersion:game.version})}catch(e){if(e instanceof ApiError&&e.status===404)throw new Error('Game deletion requires the latest API deployment. Your game has been kept.');throw e}}
- create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
- act(game:Game,action:Action){validateScoreAction(game,action);if(action.action==='rules')applyGameEdit(game,action.rules);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return action.action==='rules'?this.account().then(status=>{if(!status.gameEditingEnabled)throw new Error('Editing account games requires the latest API deployment. Your game has not changed.');return save()}):game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
- import(game:Game){validateTargetScore(game);validateScoreLimit(game);validateTargetEnding(game);const save=()=>this.request<GameView>("/games/import",game);return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
+ async deleteGame(game:Pick<Game,'id'|'version'>){this.requireGameWrites();try{return await this.request<{deleted:boolean}>(`/games/${encodeURIComponent(game.id)}/delete`,{expectedVersion:game.version})}catch(e){if(e instanceof ApiError&&e.status===404)throw new Error('Game deletion requires the latest API deployment. Your game has been kept.');throw e}}
+ create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){this.requireGameWrites();validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
+ act(game:Game,action:Action){this.requireGameWrites();validateScoreAction(game,action);if(action.action==='rules')applyGameEdit(game,action.rules);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return action.action==='rules'?this.account().then(status=>{if(!status.gameEditingEnabled)throw new Error('Editing account games requires the latest API deployment. Your game has not changed.');return save()}):game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
+ import(game:Game){this.requireGameWrites();validateTargetScore(game);validateScoreLimit(game);validateTargetEnding(game);const save=()=>this.request<GameView>("/games/import",game);return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
 }

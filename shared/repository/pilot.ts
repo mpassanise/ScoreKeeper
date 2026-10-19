@@ -36,9 +36,12 @@ export function createRepositoryPilot(options:{enabled:boolean;open:()=>Promise<
   })},
   record(scope:ReadScope|null,view:GameView){const detached=JSON.parse(JSON.stringify(view)) as GameView;return serial(async()=>{if(!options.enabled)return;if(!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const {access}=await repository();valid(scope);await access.observeGame(lease,detached);valid(scope)})},
   readGame(scope:ReadScope|null,gameId:string){return serial(async()=>{
-   if(!options.enabled)return null;if(!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');
+   if(!options.enabled)return null;if(!scope)throw stale();valid(scope);
    const {access}=await repository();valid(scope);
-   try{const value=await access.readGame(lease,gameId);valid(scope);return value}catch(error){invalidate(scope,error);throw error}
+   try{
+    if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
+    const value=await access.readGame(lease,gameId);valid(scope);return value;
+   }catch(error){invalidate(scope,error);throw error}
   })},
   recheck(){return serial(async()=>{if(!options.enabled||!selector||!lease||closed)return;const scope=capture()!,previous=lease,{access}=await repository();valid(scope);let restored:DurableLease|null;try{restored=await access.restore(scope.selector)}catch(error){invalidate(scope,error);throw error}valid(scope);
    if(!restored||restored.profileId!==previous.profileId){generation++;lease=undefined;proof=undefined;options.onInvalidated();return}
