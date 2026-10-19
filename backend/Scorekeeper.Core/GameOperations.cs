@@ -31,7 +31,7 @@ public interface IGameOperationTransaction
 
 public static class GameOperationProtocol
 {
- static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web){PropertyNameCaseInsensitive=false,UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow,RespectRequiredConstructorParameters=true,AllowDuplicateProperties=false};
+ static readonly JsonSerializerOptions Json=new(JsonSerializerDefaults.Web){PropertyNameCaseInsensitive=false,UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow,RespectRequiredConstructorParameters=true,AllowDuplicateProperties=false,NumberHandling=JsonNumberHandling.Strict};
  public static ActionOperation Parse(string json)
  {
   if(string.IsNullOrWhiteSpace(json)||Encoding.UTF8.GetByteCount(json)>2_000_000)throw new ArgumentException("Send one bounded game operation.");

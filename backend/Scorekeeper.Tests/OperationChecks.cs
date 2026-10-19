@@ -52,6 +52,9 @@ static class OperationChecks
   await Throws<ArgumentException>(()=>service.Execute("A",Wire(Guid.NewGuid(),new(1,"score",3,game.Next))));
   await Throws<JsonException>(()=>service.Execute("A",wire.Replace("\"kind\":\"action\"","\"kind\":\"action\",\"owner\":\"other\"")));
   await Throws<JsonException>(()=>service.Execute("A",wire.Replace("\"kind\":\"action\"","\"kind\":\"action\",\"kind\":\"action\"")));
+  await Throws<JsonException>(()=>service.Execute("A",wire.Replace("\"protocolVersion\":1","\"protocolVersion\":\"1\"")));
+  await Throws<JsonException>(()=>service.Execute("A",wire.Replace("\"expectedVersion\":1","\"expectedVersion\":\"1\"")));
+  await Throws<JsonException>(()=>service.Execute("A",wire.Replace("\"points\":10","\"points\":\"10\"")));
   var normalized=JsonSerializer.Serialize(GameOperationProtocol.Parse(wire),Json);
   Check(GameOperationProtocol.Fingerprint(GameOperationProtocol.Parse(wire))==GameOperationProtocol.Fingerprint(GameOperationProtocol.Parse(normalized)),"typed round-trip has one fingerprint");
   var fixture=JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"game-operation-v1.json")));
