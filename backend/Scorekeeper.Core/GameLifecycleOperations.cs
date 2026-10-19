@@ -34,6 +34,7 @@ public sealed class GameLifecycleService(IGameOperationStore store,TimeProvider 
 {
  public Task<OperationAcknowledgement> Execute(string owner,string json)
  {
+  if(string.IsNullOrWhiteSpace(owner))throw new UnauthorizedAccessException();
   var op=GameLifecycleProtocol.Parse(json);var hash=GameLifecycleProtocol.Fingerprint(op);
   return store.Transaction(owner,async tx=>{
    if(await tx.AccountBlocked())throw new AccountOperationsBlockedException();
@@ -50,7 +51,7 @@ public sealed class GameLifecycleService(IGameOperationStore store,TimeProvider 
    if(record?.Deleted==true)error="GAME_DELETED";
    else if(op.Kind is "create" or "import"){
     if(record is not null)error="GAME_ALREADY_EXISTS";
-    else await tx.InsertGame(op.Game! with{Version=1,Updated=now,StartedAt=op.Game.StartedAt??now});
+    else await tx.InsertGame(op.Game! with{Version=1,Updated=now,StartedAt=op.Kind=="create"?(op.Game.StartedAt??now):op.Game.StartedAt});
    }else if(record is null){
     if(op.ExpectedVersion!=0)error="GAME_NOT_FOUND";
     else await tx.WriteTombstone(op.GameId,0,now);

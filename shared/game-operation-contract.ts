@@ -9,7 +9,7 @@ type TargetedCommand=
  | {action:'finish'|'resume'};
 export type GameActionOperation={protocolVersion:1;kind:'action';operationId:string;gameId:string;command:TargetedCommand&{expectedVersion:number}};
 export type GameLifecycleOperation=
- | {protocolVersion:1;kind:'create'|'import';operationId:string;gameId:string;expectedVersion:0;game:Game}
+ | {protocolVersion:1;kind:'create'|'import';operationId:string;gameId:string;expectedVersion:0;game:Omit<Game,'deviceOnly'>&{deviceOnly?:never}}
  | {protocolVersion:1;kind:'delete';operationId:string;gameId:string;expectedVersion:number;game?:null};
 export type GameOperation=GameActionOperation|GameLifecycleOperation;
 export type OperationError='GAME_ALREADY_EXISTS'|'GAME_FINISHED'|'GAME_NOT_FOUND'|'GAME_DELETED'|'VERSION_CONFLICT'|'UNDO_TARGET_CHANGED'|'ENTRY_ID_REUSED'|'INVALID_GAME_COMMAND';

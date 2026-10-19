@@ -32,10 +32,20 @@ try{
  Check(await store.OperationCapability() is null,"missing schema never advertises capability");await Reject<GameOperationsUnavailableException>(()=>service.Execute(owner,wire));
  await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[3]));
  Check(await store.OperationCapability() is null,"schema 004 alone cannot advertise lifecycle support");
+ // Seed an actual v1 receipt before upgrading, including a score subsequently undone by a legacy client.
+ var priorOwner="sql-prior-v1";var priorGame=game with{Id=Guid.NewGuid()};await store.Insert(priorOwner,priorGame);
+ var priorEntry=Guid.NewGuid();var priorOp=Guid.NewGuid();var priorWire=Wire(priorOp,priorGame,entry:priorEntry);
+ var priorAck=new OperationAcknowledgement(priorOp,priorGame.Id,"applied",2,1,null);
+ var priorHash=GameOperationProtocol.Fingerprint(GameOperationProtocol.Parse(priorWire));
+ var scoredPrior=Scoring.Apply(priorGame,new(1,"score",10,priorGame.Next),priorEntry);
+ await store.Replace(priorOwner,scoredPrior,1);await store.Replace(priorOwner,Scoring.Apply(scoredPrior,new(2,"undo")),2);
+ await Sql(dbAdmin.ConnectionString,$"INSERT dbo.GameOperationReceipts(OwnerKey,OperationId,GameId,Fingerprint,Acknowledgement,AddedEntryId) VALUES('{GameStore.OwnerKey(priorOwner)}','{priorOp}','{priorGame.Id}','{priorHash}',N'{JsonSerializer.Serialize(priorAck,GameStore.Json)}','{priorEntry}')");
  var unicodeOwner="sql-owner-\u00e9-\U0001F3B2";var backfilled=Scoring.Apply(game with{Id=Guid.NewGuid()},new(1,"score",9));await store.Insert(unicodeOwner,backfilled);
  await Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4]));
  Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",unicodeOwner)==1,"migration backfills identifiers with identical UTF-8 owner hash");
  Check(await store.OperationCapability() is not null,"enabled installed lifecycle schema advertises operations");
+ Check(priorAck==await service.Execute(priorOwner,priorWire)&&(await store.Get(priorOwner,priorGame.Id))!.Entries.Length==0,"pre-upgrade action receipt still replays after legacy undo without resurrecting score");
+ Check(await Count(dbAdmin.ConnectionString,"GameEntryReservations",priorOwner)==1,"migration backfills undone historical receipt entry");
  var off=Store(false);Check(await off.OperationCapability() is null,"flag-off capability remains null after migration");await Reject<GameOperationsUnavailableException>(()=>new GameOperationService(off).Execute(owner,wire));store=Store();service=new(store);
  var first=await service.Execute(owner,wire);var reopened=new GameOperationService(Store());Check(first==await reopened.Execute(owner,wire),"receipt survives fresh store/service instance");
  Check((await store.Get(owner,game.Id))!.Entries.Single().Id==entryId&&await Count(dbAdmin.ConnectionString,"GameOperationReceipts",owner)==1,"stable entry and one durable receipt");
