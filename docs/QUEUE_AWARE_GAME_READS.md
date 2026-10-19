@@ -45,3 +45,8 @@ The unavoidable document read/serialization remains linear in profile history. T
 `node scripts/benchmark-game-reads.mjs` creates a valid 7.7 MB profile containing 9,000 retained operations in 18 compaction batches and reports cold/warm tracked reads plus an untracked read on fake IndexedDB and desktop SQLite. It performs no network requests and asserts no machine-dependent timing thresholds. Regression tests instead verify unchanged histories are not replay-validated, changed revisions are revalidated (including independent handles), returned models stay detached, and same-revision corrupt content fails closed.
 
 For the original fake-IndexedDB fixture on this development host, baseline tracked reads took 407–477 ms and an untracked read 792 ms. A follow-up run after optimization took 270 ms cold, 82–91 ms warm and 161 ms untracked. These measurements are illustrative desktop observations, not an iPhone guarantee; use the committed benchmark for reproducible current measurements.
+
+
+## Increment 8 extension
+
+[Read-only account screens](ACCOUNT_GAME_SCREEN_PILOT.md) now consume this model behind separate default-false web/native flags. Account writes are excluded at the transport boundary while device-only games remain playable. Earlier notes about no visible account-cache use describe increment 7. Full queued scoring, conflict choices and replay remain disabled.
