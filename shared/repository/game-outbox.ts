@@ -197,6 +197,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read('write');
    const duplicate=ctx.state.games.flatMap(g=>g.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
    if(duplicate){if(duplicate.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID already has a different immutable request.');return}
+   if(ctx.state.archive.some(b=>b.kind==='account-selected'&&b.id===op.operationId))throw new OutboxError('OPERATION_ID_REUSED','This operation ID belongs to a retained review decision.');
    const retained=ctx.state.archive.flatMap(b=>b.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
    if(retained){if(retained.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID already has a different immutable request.');if(retained.status!=='applied')throw new OutboxError('NEEDS_REVIEW','This request was retained during conflict review and will not be resubmitted automatically.');return}
    let game=ctx.state.games.find(g=>g.gameId===op.gameId);
