@@ -24,6 +24,7 @@ jobs:
           version: '11.25.0'
       - run: pnpm install --frozen-lockfile
       - run: node scripts/test-api-client.mjs
+      - run: node scripts/test-game-operation-contract.mjs
       - run: node scripts/test-frequent-players.mjs
       - run: node scripts/test-frequent-player-sync.mjs
       - run: node scripts/test-game-list-cache.mjs
