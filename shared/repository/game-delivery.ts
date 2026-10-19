@@ -1,7 +1,7 @@
 import {ApiError,type AccountStatus,type GameView} from '../api';
 import type {OperationAcknowledgement} from '../game-operation-contract';
-import {snapshot} from './confirmed-games';
-import {operationFromWire,type createGameOutbox} from './game-outbox';
+import {LocalRepositoryError,snapshot} from './confirmed-games';
+import {OutboxError,operationFromWire,type createGameOutbox} from './game-outbox';
 
 type Outbox=ReturnType<typeof createGameOutbox>;
 export type DeliverySession={account:(signal:AbortSignal)=>Promise<AccountStatus>;operation:(wire:string,signal:AbortSignal)=>Promise<OperationAcknowledgement>;get:(gameId:string,signal:AbortSignal)=>Promise<GameView>};
@@ -54,7 +54,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
     await stage(name,s=>new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{s.removeEventListener('abort',abort);resolve()},Math.min(5000,Math.floor(retryDelay*attempt*(0.75+Math.random()/2)))),abort=()=>{clearTimeout(timer);reject(new DeliveryFailure('DELIVERY_CANCELLED'))};s.addEventListener('abort',abort,{once:true});if(s.aborted)abort()}));
    }
   }
-  let review=false,confirmed=0,missingSnapshot=false;
+  let review=false,confirmed=0,missingSnapshot=false,reviewCode:string|undefined;
   try{
    publish({phase:'connecting',stage:'account'});
    const session=await stage('account',s=>transport.open(s)),account=await retry('account',s=>session.account(s));
@@ -69,7 +69,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
    async function refreshGame(gameId:string){try{return await refresh(gameId)}catch(e){if(codeOf(e)==='SNAPSHOT_UNAVAILABLE'){review=true;missingSnapshot=true;return null}throw e}}
    for(const original of initial.games){
     let changed=false;
-    while(true){
+    try{while(true){
      const current=(await stage('queue',()=>outbox.read())).games.find(g=>g.gameId===original.gameId);if(!current)break;
      if(current.tombstone)break;
      const head=current.operations.find(i=>i.status!=='applied');
@@ -85,10 +85,18 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
      await stage('queue',()=>outbox.acknowledge(op.operationId,acknowledgement));confirmed++;changed=true;
      if(acknowledgement.outcome==='rejected'){review=true;continue}
      if(op.kind==='delete'){await stage('queue',()=>outbox.settle(current.gameId));break}
+    }}catch(e){
+     // Only known game-specific reconciliation failures are isolated. Identity,
+     // authentication, protocol and storage failures still stop the whole pass.
+     await check();
+     if((e instanceof OutboxError&&e.code==='NEEDS_REVIEW')||(e instanceof LocalRepositoryError&&e.code==='VERSION_COLLISION')){
+      review=true;reviewCode??=e.code;continue;
+     }
+     throw e;
     }
    }
    const final=await stage('queue',()=>outbox.read()),pending=final.games.reduce((n,g)=>n+g.operations.length,0);review=review||final.games.some(g=>g.operations.some(i=>i.status==='rejected'));
-   return publish({phase:review?'needs-review':pending?'pending':'synced',pending,...(missingSnapshot?{code:'SNAPSHOT_UNAVAILABLE'}:{})});
+   return publish({phase:review?'needs-review':pending?'pending':'synced',pending,...(missingSnapshot?{code:'SNAPSHOT_UNAVAILABLE'}:reviewCode?{code:reviewCode}:{})});
   }catch(e){
    const problem=fatal??e,phase=phaseFor(problem);let blockFailed=false;
    if(phase==='account-blocked'){
@@ -100,7 +108,18 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
  }
  return {
   state(){return {...state}},
-  connect():Promise<DeliveryState>{if(!enabled)return Promise.resolve(publish({phase:'disabled'}));if(closed)return Promise.resolve({...state,phase:'cancelled'});if(active)return active;const c=new AbortController();controller=c;const runId=++generation;active=run(c,runId).finally(()=>{active=null;if(controller===c)controller=null});return active},
+  connect():Promise<DeliveryState>{
+   if(!enabled)return Promise.resolve(publish({phase:'disabled'}));
+   if(closed)return Promise.resolve({...state,phase:'cancelled'});
+   if(active)return active;
+   const c=new AbortController();controller=c;const runId=++generation;
+   // Register before run can publish state and invoke a reentrant subscriber.
+   const pass=Promise.resolve().then(()=>run(c,runId)).finally(()=>{
+    if(active===pass)active=null;
+    if(controller===c)controller=null;
+   });
+   active=pass;return pass;
+  },
   cancel,
   close(){closed=true;cancel()}
  };

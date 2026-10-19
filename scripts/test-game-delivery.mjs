@@ -64,9 +64,48 @@ try{
   // A hanging token provider/pass remains bounded, even if it ignores abort.
   worker=access.delivery(lease,{open:()=>new Promise(()=>{})},{...settings,passTimeoutMs:15,stepTimeoutMs:1000});assert.equal((await worker.connect()).code,'PASS_LIMIT');worker.close();
   const paused=await seed(),pauseOp=score(paused,1);await out.enqueue(pauseOp);let unavailablePosts=0;worker=access.delivery(lease,{open:async()=>({...eSession,operation:async()=>{unavailablePosts++;throw new ApiError(503,'disabled','OPERATIONS_UNAVAILABLE')}})},settings);assert.equal((await worker.connect()).phase,'unavailable');assert.equal(unavailablePosts,1,'disabled backend is not retried or replaced with legacy mutation');worker.close();
+  // Late lifecycle callbacks from an old lease cannot close the new account's worker.
+  await verify('old');const oldLease=lease;await verify('current');const currentLease=lease;
+  started=deferred();response=deferred();let currentCalls=0;
+  const currentSession={...session,account:async()=>{currentCalls++;started.resolve();return response.promise}};
+  worker=access.delivery(currentLease,{open:async()=>currentSession},settings);const currentPass=worker.connect();await started.promise;
+  access.connectionUnavailable(oldLease);
+  for(const stale of [()=>access.signOut(oldLease),()=>access.beginDeletion(oldLease),()=>access.verify(oldLease,status('old'))])await assert.rejects(stale,e=>e.code==='STALE_ACCOUNT');
+  response.resolve(status('current'));assert.equal((await currentPass).phase,'synced');assert.equal((await worker.connect()).phase,'synced');assert.equal(currentCalls,2,'stale callbacks leave the current worker reusable');worker.close();
+  // Equivalent restored proofs refer to the same durable lease and must still cancel its workers synchronously.
+  const equivalent=await access.restore('selector-current');started=deferred();response=deferred();
+  worker=access.delivery(currentLease,{open:async()=>currentSession},settings);const equivalentPass=worker.connect();await started.promise;
+  access.connectionUnavailable(equivalent);assert.equal((await equivalentPass).phase,'cancelled');response.resolve(status('current'));worker.close();await verify('current');
+  // Status callbacks may reenter connect. Both callers must receive the registered pass.
+  let nested,reentered=false,opens=0;
+  worker=access.delivery(lease,{open:async()=>{opens++;return {...session,account:async()=>status('current')}}},{...settings,onState:s=>{if(s.phase==='connecting'&&!reentered){reentered=true;nested=worker.connect()}}});
+  const outer=worker.connect();assert.equal((await outer).phase,'synced');assert.equal(nested,outer);assert.equal(opens,1);worker.close();
+  // A game-specific content mismatch must preserve its evidence without starving another game.
+  for(const collision of [false,true]){
+   const profile=collision?'collision':'mismatch';await verify(profile);const blocked=await seed(),healthy=await seed(),blockedOp=score(blocked,1),healthyOp=score(healthy,1);
+   await out.enqueue(blockedOp);await out.enqueue(healthyOp);await out.prepareDelivery(blocked.id,cap);await out.acknowledge(blockedOp.operationId,ack(blockedOp));
+   serverGames.set(healthy.id,structuredClone(healthy));const before=(await out.read()).games.find(g=>g.gameId===blocked.id);let healthyPosts=0;
+   const isolated={...session,account:async()=>status(profile),get:async id=>id===blocked.id?gameView({...blocked,name:collision?'Conflicting name':blocked.name,version:collision?1:2}):session.get(id),operation:async(wire,signal)=>{assert.equal(JSON.parse(wire).gameId,healthy.id);healthyPosts++;return session.operation(wire,signal)}};
+   worker=access.delivery(lease,{open:async()=>isolated},settings);
+   for(let pass=0;pass<2;pass++){const result=await worker.connect();assert.equal(result.phase,'needs-review');assert.equal(result.code,collision?'VERSION_COLLISION':'NEEDS_REVIEW')}
+   assert.equal(healthyPosts,1,'healthy changes drain exactly once despite another game requiring review');const after=await out.read(),retained=after.games.find(g=>g.gameId===blocked.id);
+   assert.deepEqual(retained.operations,before.operations);assert.deepEqual(retained.projection,before.projection);assert.equal(retained.base.serverVersion,1);if(!collision)assert.equal(retained.candidate.serverVersion,2);
+   assert.equal(after.games.find(g=>g.gameId===healthy.id).operations.length,0);worker.close();
+  }
+  // Storage failures still stop the pass rather than being mistaken for a game conflict.
+  await verify('storage');const broken=await seed(),later=await seed();await out.enqueue(score(broken,1));await out.enqueue(score(later,1));let storagePosts=0;
+  const saveDocument=repo.documents.write;repo.documents.write=async(key,...args)=>{if(key==='game-outbox:storage')throw new (require(path.join(root,'repository/confirmed-games.js')).LocalRepositoryError)('STORAGE_UNAVAILABLE','test storage failure');return saveDocument(key,...args)};
+  try{worker=access.delivery(lease,{open:async()=>({...session,account:async()=>status('storage'),operation:async()=>{storagePosts++;throw Error('must not post')}})},settings);assert.equal((await worker.connect()).phase,'unavailable');assert.equal(storagePosts,0);worker.close()}finally{repo.documents.write=saveDocument}
+  // The per-game catch must not continue past authentication or invalid receipt failures.
+  for(const unauthorized of [false,true]){
+   const profile=unauthorized?'unauthorized':'protocol';await verify(profile);const firstGame=await seed(),nextGame=await seed();await out.enqueue(score(firstGame,1));await out.enqueue(score(nextGame,1));let attempted=0;
+   worker=access.delivery(lease,{open:async()=>({...session,account:async()=>status(profile),operation:async wire=>{attempted++;if(unauthorized)throw new ApiError(401,'expired');return {...ack(JSON.parse(wire)),operationId:randomUUID()}}})},settings);
+   const result=await worker.connect();assert.equal(result.phase,unauthorized?'sign-in-required':'unavailable');if(!unauthorized)assert.equal(result.code,'INVALID_ACKNOWLEDGEMENT');assert.equal(attempted,1);
+   const pending=await out.read();assert.equal(pending.games[0].operations[0].status,'uncertain');assert.equal(pending.games[1].operations[0].status,'queued');worker.close();
+  }
   // Deleting account status persists a durable block before a new worker can run.
   await verify('D');worker=access.delivery(lease,{open:async()=>({...session,account:async()=>({...status('D'),deletionStatus:'pending'})})},settings);assert.equal((await worker.connect()).phase,'account-blocked');assert.equal(await access.restore('selector-D'),null);assert.ok(await access.isDeletionBlocked('D'));worker.close();
-  await access.close();console.log(name+': disabled/no side effects, reconnect coalescing, immutable retries, post-ack refresh recovery, conflict preservation, capability/token/identity gates, timeouts and late results, same/independent-handle cancellation, 404 preservation and deletion receipts/blocking passed.');
+  await access.close();console.log(name+': disabled/no side effects, reconnect coalescing, immutable retries, post-ack refresh recovery, conflict preservation, capability/token/identity gates, timeouts and late results, same/independent-handle cancellation, 404 preservation, deletion receipts/blocking, stale-lease isolation, reentrant coalescing, independent-game reconciliation and fail-closed error handling passed.');
  }
  // HTTP adapter pins one token for the pass, uses raw bytes, and never retries a POST internally.
  const realFetch=globalThis.fetch;try{
