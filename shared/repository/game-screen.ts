@@ -10,7 +10,7 @@ export async function observeGameScreen(pilot:RepositoryPilot,scope:ReadScope|nu
   const code=(error as {code?:string})?.code;
   if(code!=='NEEDS_REVIEW'&&code!=='VERSION_COLLISION')throw error;
   const retained=await pilot.readGame(scope,gameId);
-  if(retained?.kind==='game'||retained?.kind==='pending-delete')return {...retained,sync:'needs-review'};
+  if((retained?.kind==='game'||retained?.kind==='pending-delete')&&retained.sync==='needs-review')return retained;
   if(retained?.kind==='deleted')return retained;
   throw error;
  }

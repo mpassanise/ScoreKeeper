@@ -2,6 +2,7 @@ import type {AccountStatus,GameView} from '../api';
 import {AccountAccessError} from './account-access';
 import {LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-games';
 import type {AccountGameRead} from './game-read-model';
+import {readGameCollision,keepGameCollision} from './game-collisions';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
 import {clearGameReadCache,createGameOutbox} from './game-outbox';
@@ -45,6 +46,11 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
   const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);return lease;
  }
+ async function withReview(proof:DurableLease,gameId:string,read:AccountGameRead):Promise<AccountGameRead>{
+  const collision=await readGameCollision(documents,proof.profileId,gameId);await current(proof);
+  if(collision&&(read.kind==='game'||read.kind==='pending-delete'))return {...read,sync:'needs-review'};
+  return read;
+ }
  const api={
   async beginVerification(selector:string,expectedProfileId?:string):Promise<VerificationTicket>{
    if(closed)throw new AccountAccessError('STALE_ACCOUNT');
@@ -65,18 +71,30 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   async readConfirmed(proof:DurableLease,gameId:string){account(proof);await current(proof);const value=await repository.readConfirmed(proof.profileId,gameId);await current(proof);return value},
   async readGame(proof:DurableLease,gameId:string):Promise<AccountGameRead>{
    account(proof);await current(proof);
-   const outbox=api.outbox(proof),tracked=await outbox.readGame(gameId);if(tracked){await current(proof);return tracked}
+   const outbox=api.outbox(proof),tracked=await outbox.readGame(gameId);if(tracked){await current(proof);return withReview(proof,gameId,tracked)}
    const cached=await repository.readConfirmed(proof.profileId,gameId);await current(proof);
    // A writer may have started tracking while the generic cache read was pending.
-   const latest=await outbox.readGame(gameId);await current(proof);if(latest)return latest;
-   return cached?{kind:'game',source:'cache',sync:'confirmed',view:cached.view,pendingOperations:0,serverVersion:cached.serverVersion}:{kind:'missing'};
+   const latest=await outbox.readGame(gameId);await current(proof);if(latest)return withReview(proof,gameId,latest);
+   return withReview(proof,gameId,cached?{kind:'game',source:'cache',sync:'confirmed',view:cached.view,pendingOperations:0,serverVersion:cached.serverVersion}:{kind:'missing'});
   },
   async observeGame(proof:DurableLease,view:GameView):Promise<AccountGameRead>{
    account(proof);const observed=snapshot(proof.profileId,view);await current(proof);
    if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   if(await readGameCollision(documents,proof.profileId,observed.gameId)){await current(proof);throw new LocalRepositoryError('VERSION_COLLISION','Saved account versions still require review. Both copies have been kept.')}
    const outbox=api.outbox(proof),tracked=await outbox.readGame(observed.gameId);
-   if(tracked)await outbox.observeSnapshot(observed);
-   else await api.saveConfirmed(proof,[observed.view]);
+   try{
+    if(tracked)await outbox.observeSnapshot(observed);
+    else await api.saveConfirmed(proof,[observed.view]);
+   }catch(error){
+    if((error as {code?:string})?.code!=='VERSION_COLLISION')throw error;
+    // Preserve the actual authoritative base/candidate, not a local projection.
+    const queued=(await outbox.read()).games.find(game=>game.gameId===observed.gameId);
+    const retained=queued?.candidate??queued?.base??await api.readConfirmed(proof,observed.gameId);
+    if(!retained)throw error;
+    await current(proof);
+    await keepGameCollision(documents,{key:KEY,revision:proof.revision},retained,observed);
+    await current(proof);throw error;
+   }
    // The queue is authoritative even if tracking began during the cache save.
    return api.readGame(proof,observed.gameId);
   },

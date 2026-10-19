@@ -148,6 +148,20 @@ console.log('Target round endings: remaining turns, final winners, ties, correct
  result=await startGame({...base,cloud:healthy});assert.equal(result.deviceOnly,false,'healthy account still saves to account');
  const before=deviceData;await assert.rejects(()=>startGame({...base,cloud:offline,players:['A','A']}),/different player names/);assert.equal(deviceData,before,'invalid setup never creates a fallback');
  const failedLocal=new LocalGames({read:async()=>null,write:async()=>{throw new Error('Storage full')}},randomUUID);await assert.rejects(()=>startGame({...base,local:failedLocal,cloud:offline}),/Storage full/);
+ // Device-only starts are visible after the first durable write, even if a
+ // hypothetical second write fails. Guest starts remain unclassified.
+ for(const fallback of [false,true]){
+  let raw=null,writes=0;const atomic=new LocalGames({read:async()=>raw,write:async value=>{if(++writes>1)throw Error('Second write failed');raw=value}},randomUUID);
+  const created=await startGame({...base,local:atomic,cloud:offline,signedIn:fallback,deviceOnly:!fallback});
+  assert.equal(writes,1);assert.equal(created.view.game.deviceOnly,true);
+  const reopened=new LocalGames({read:async()=>raw,write:async()=>assert.fail()},randomUUID);
+  assert.equal(mergeDeviceGames([],await reopened.list()).length,1);
+ }
+ let raw=null,fail=true;const rejected=new LocalGames({read:async()=>raw,write:async value=>{if(fail)throw Error('Storage full');raw=value}},randomUUID);
+ await assert.rejects(()=>startGame({...base,local:rejected,cloud:offline,signedIn:false,deviceOnly:true}),/Storage full/);
+ assert.equal((await rejected.list()).length,0);fail=false;
+ await startGame({...base,local:rejected,cloud:offline,signedIn:false,deviceOnly:true});assert.equal(mergeDeviceGames([],await rejected.list()).length,1,'retry after failed commit creates exactly one visible game');
+ const guest=await startGame({...base,cloud:offline,signedIn:false});assert.equal(guest.view.game.deviceOnly,undefined);
  console.log('Reliable signed-in starts: offline, expired session, unsupported rules, timeout, scoring/reload, dashboard visibility, healthy cloud, invalid setup and storage errors passed.');
 }
 {

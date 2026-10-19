@@ -83,12 +83,47 @@ try{
   const retainedMismatch=await observeGameScreen(pilot,scope,mismatch.id,gameView({...mismatch,version:2}));assert.equal(retainedMismatch.sync,'needs-review');assert.equal(retainedMismatch.view.game.entries.length,1);assert.ok(gameScreenMessage(retainedMismatch).title.includes('review'));
   const remote=base();const firstRemote=await openGameScreen(pilot,scope,remote.id,async()=>{fetches++;return gameView(remote)});assert.equal(firstRemote.kind,'game');assert.equal(fetches,1);await openGameScreen(pilot,scope,remote.id,neverFetch);assert.equal(fetches,1);
   await rejects(()=>openGameScreen(pilot,scope,randomUUID(),async()=>gameView(remote)),'INVALID_SNAPSHOT');
+  // Same-version contradictions are durable review evidence for cache and queue.
+  const collisions=[];
+  for(const tracked of [false,true]){
+   const collision=base(),original=gameView(collision);await pilot.record(scope,original);
+   if(tracked){const writer=createDurableAccountRepository(await open()),restored=await writer.restore('selector-A');const verified=await writer.verify(restored,status('A'));await writer.outbox(verified).seedConfirmed(collision.id);await writer.close();scope=await pilot.prepare('selector-A');await pilot.verify(scope,status('A'))}
+   const different=gameView({...collision,entries:[{id:randomUUID(),playerId:collision.next,points:17}]});
+   const reviewed=await observeGameScreen(pilot,scope,collision.id,different);
+   assert.equal(reviewed.sync,'needs-review');assert.deepEqual(reviewed.view,original);
+   assert.equal((await openGameScreen(pilot,scope,collision.id,neverFetch)).sync,'needs-review');
+   const evidenceRepo=await open(),key='game-collision:'+JSON.stringify(['A',collision.id]),evidence=await evidenceRepo.documents.read(key);
+   assert.deepEqual(evidence.value.retained.view,original);assert.deepEqual(evidence.value.observed.view,different);
+   // Matching and newer GETs cannot silently discard an unresolved contradiction.
+   await observeGameScreen(pilot,scope,collision.id,original);await observeGameScreen(pilot,scope,collision.id,gameView({...collision,version:5}));
+   assert.deepEqual(await evidenceRepo.documents.read(key),evidence);
+   // Corrupt evidence fails closed instead of returning a confirmed cache copy.
+   await evidenceRepo.documents.write(key,evidence.revision,{...evidence.value,schemaVersion:99});
+   await rejects(()=>openGameScreen(pilot,scope,collision.id,neverFetch),'STORAGE_CORRUPT');
+   const damaged=await evidenceRepo.documents.read(key);await evidenceRepo.documents.write(key,damaged.revision,evidence.value);await evidenceRepo.close();
+   collisions.push({collision,original,different});
+  }
+  // A failed evidence commit cannot be reported as a successfully retained review.
+  const failingRepo=await open(),failingAccess=createDurableAccountRepository(failingRepo);let failingLease=await failingAccess.restore('selector-A');failingLease=await failingAccess.verify(failingLease,status('A'));
+  const failed=base();await failingAccess.observeGame(failingLease,gameView(failed));const writeEvidence=failingRepo.documents.write;
+  failingRepo.documents.write=async(key,...args)=>{if(key.startsWith('game-collision:'))throw new Error('Quota full');return writeEvidence(key,...args)};
+  await assert.rejects(()=>failingAccess.observeGame(failingLease,gameView({...failed,entries:[{id:randomUUID(),playerId:failed.next,points:20}]})),/Quota full/);
+  assert.equal((await failingAccess.readGame(failingLease,failed.id)).view.game.entries.length,0);
+  // Revocation between evidence preparation and its transaction rejects the
+  // lifecycle guard; no late account evidence may be installed.
+  failingRepo.documents.write=async(key,...args)=>{if(key.startsWith('game-collision:')){const revoker=createDurableAccountRepository(await open());await revoker.signOut(await revoker.restore('selector-A'));await revoker.close()}return writeEvidence(key,...args)};
+  await rejects(()=>failingAccess.observeGame(failingLease,gameView({...failed,entries:[{id:randomUUID(),playerId:failed.next,points:21}]})),'STORAGE_CONFLICT');
+  assert.equal(await failingRepo.documents.read('game-collision:'+JSON.stringify(['A',failed.id])),null);
+  await failingAccess.close();
+  scope=await pilot.prepare('selector-A');await pilot.verify(scope,status('A'));
+
   const offline=createRepositoryPilot({enabled:true,open,onInvalidated:()=>assert.fail()});offline.select('selector-A');const offlineScope=offline.capture();
   assert.equal((await openGameScreen(offline,offlineScope,g.id,neverFetch)).kind,'game','cold-start retained scopes restore without a network or verification write');
+  for(const {collision,original}of collisions){const restored=await openGameScreen(offline,offlineScope,collision.id,neverFetch);assert.equal(restored.sync,'needs-review','cold-start review survives process/handle restart');assert.deepEqual(restored.view,original)}
   await rejects(()=>offline.record(offlineScope,server),'SYNC_UNAVAILABLE');await offline.close();
   const lateGame=base();let began,finish;const beganRead=new Promise(r=>began=r),lateResponse=new Promise(r=>finish=r);
   const lateOpen=openGameScreen(pilot,scope,lateGame.id,async()=>{began();return lateResponse});await beganRead;
-  const staleScope=scope;pilot.select('selector-B');finish(gameView(lateGame));await rejects(()=>lateOpen,'STALE_ACCOUNT');await rejects(()=>pilot.readGame(staleScope,g.id),'STALE_ACCOUNT');await rejects(()=>openGameScreen(pilot,staleScope,g.id,neverFetch),'STALE_ACCOUNT');assert.equal(fetches,1);scope=await pilot.prepare('selector-B');await pilot.verify(scope,status('B'));assert.deepEqual(await pilot.readGame(scope,g.id),{kind:'missing'});assert.deepEqual(await pilot.readGame(scope,lateGame.id),{kind:'missing'});await rejects(()=>pilot.record(staleScope,server),'STALE_ACCOUNT');
+  const staleScope=scope;pilot.select('selector-B');finish(gameView(lateGame));await rejects(()=>lateOpen,'STALE_ACCOUNT');await rejects(()=>pilot.readGame(staleScope,g.id),'STALE_ACCOUNT');await rejects(()=>openGameScreen(pilot,staleScope,g.id,neverFetch),'STALE_ACCOUNT');assert.equal(fetches,1);scope=await pilot.prepare('selector-B');await pilot.verify(scope,status('B'));assert.deepEqual(await pilot.readGame(scope,g.id),{kind:'missing'});assert.deepEqual(await pilot.readGame(scope,lateGame.id),{kind:'missing'});for(const {collision}of collisions)assert.deepEqual(await pilot.readGame(scope,collision.id),{kind:'missing'});await rejects(()=>pilot.record(staleScope,server),'STALE_ACCOUNT');
   const other=createDurableAccountRepository(await open());await other.signOut(await other.restore('selector-B'));await rejects(()=>pilot.readGame(scope,g.id),'STALE_ACCOUNT');assert.equal(invalidations,1);await pilot.close();await other.close();
   console.log(name+': cache/queue precedence, detached and read-only reads, uncertain outcomes, restart, receipt/snapshot confirmation, deletion barriers, review evidence, corrupt-store denial, concurrent tracking and shared-pilot account isolation passed.');
  }

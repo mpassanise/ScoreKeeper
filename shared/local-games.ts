@@ -41,9 +41,9 @@ export class LocalGames{
  async get(id:string){const g=(await this.read()).find(g=>g.id===id);if(!g)throw new Error("Game not found on this device.");return gameView(g)}
  async forget(id:string){const games=await this.read();await this.storage.write(JSON.stringify(games.filter(g=>g.id!==id)))}
  async deleteGame(game:Pick<Game,'id'|'version'>){const games=await this.read(),g=games.find(g=>g.id===game.id);if(!g)return {deleted:true};if(g.version!==game.version)throw new ApiError(409,'This game changed. Refresh before deleting.');if(g.finished)throw new Error('Only in-progress games can be deleted.');await this.storage.write(JSON.stringify(games.filter(g=>g.id!==game.id)));return {deleted:true}}
- async create(id:string,name:string,names:string[],winner:"high"|"low",rules:Rules={}){
+ async create(id:string,name:string,names:string[],winner:"high"|"low",rules:Rules={},options:{deviceOnly?:boolean}={}){
  const clean=validateGameCreation(name,names,winner,rules);
- const players=clean.map(name=>({id:this.uuid(),name}));const now=new Date().toISOString();return this.put({id,name:name.trim(),players,winner,...rules,entries:[],next:players[0].id,finished:false,startedAt:now,endedAt:null,version:1,updated:now})}
+ const players=clean.map(name=>({id:this.uuid(),name}));const now=new Date().toISOString();return this.put({id,name:name.trim(),players,winner,...rules,...(options.deviceOnly?{deviceOnly:true}:{}),entries:[],next:players[0].id,finished:false,startedAt:now,endedAt:null,version:1,updated:now})}
  async act(game:Game,a:Action){let g=(await this.get(game.id)).game;const originalFinished=g.finished,originalEndedAt=g.endedAt;if(g.version!==game.version)throw new ApiError(409,"This game changed in another window. Refresh before scoring.");
  if(a.action==="score"||a.action==="edit"){if(!Number.isInteger(a.points)||Math.abs(a.points!)>100000)throw new Error("Points must be a whole number between -100,000 and 100,000.")}
  switch(a.action){
