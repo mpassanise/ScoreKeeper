@@ -1,4 +1,4 @@
-import {supportsQueuedScoring} from './scoring-writer';
+import {supportsQueuedScoring,supportsQueuedCompletion} from './scoring-writer';
 import type {GameActionOperation} from '../game-operation-contract';
 import {queueHome,homeResult,retainHomeSummaries} from './game-home';
 import type {AccountStatus,GameView,GameSummary} from '../api';
@@ -26,7 +26,7 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
 }
 /** Durable account state shared by IndexedDB and SQLite; no tokens or email keys. */
 export function createDurableAccountRepository(repository:ConfirmedGames){
- const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
+ const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
  function stopDeliveries(proof?:DurableLease|VerificationTicket){
   clearGameReadCache(documents,proof?{key:KEY,revision:proof.revision}:undefined);
   for(const [worker,lease]of deliveries){
@@ -42,13 +42,13 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
  }
  async function write(expected:number,state:Lifecycle){if(closed)throw new AccountAccessError('STALE_ACCOUNT');try{return await documents.write(KEY,expected,state)}catch(error){if(error instanceof LocalRepositoryError&&error.code==='STORAGE_CONFLICT')throw new AccountAccessError('STALE_ACCOUNT');throw error}}
  async function accept(proof:DurableLease|VerificationTicket,status:AccountStatus){
-  const scoringSupported=supportsQueuedScoring(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);}
+  const scoringSupported=supportsQueuedScoring(status.gameOperations),completionSupported=supportsQueuedCompletion(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);completion.delete(proof);}
   const {record,state}=await current(proof),profileId=status.profileId;
   if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');
   const expected=proof.kind==='account'?proof.profileId:state.pending?.expectedProfileId;
   if(expected&&expected!==profileId){await write(record!.revision,{...state,active:null,pending:null});throw new AccountAccessError('PROFILE_MISMATCH')}
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
-  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);return lease;
+  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);return lease;
  }
  async function withReview(proof:DurableLease,gameId:string,read:AccountGameRead):Promise<AccountGameRead>{
   const collision=await readGameCollision(documents,proof.profileId,gameId);await current(proof);
@@ -86,7 +86,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    const read=saved.read?await withReview(proof,gameId,saved.read):await api.readGame(proof,gameId);await current(proof);
    if(read.kind!=='game')return read;
    const permission=offlineWrites.has(proof)&&scoring.has(proof),ready=permission&&saved.eligible&&read.sync!=='needs-review';
-   return {...read,canScore:ready,scoreProfileId:proof.profileId,scoreAccess:!permission?'connect':read.source!=='queue'?'untracked':ready?'ready':'paused'};
+   return {...read,canScore:ready,canChangeCompletion:offlineWrites.has(proof)&&completion.has(proof)&&saved.completionEligible&&read.sync!=='needs-review',scoreProfileId:proof.profileId,scoreAccess:!permission?'connect':read.source!=='queue'?'untracked':ready?'ready':'paused'};
   },
   async prepareScoring(proof:DurableLease,input:GameView):Promise<AccountGameRead>{
    account(proof);const selected=JSON.parse(JSON.stringify(input)) as GameView;await current(proof);
@@ -97,7 +97,8 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   async enqueueScoring(proof:DurableLease,input:GameActionOperation):Promise<AccountGameRead>{
    account(proof);const operation=JSON.parse(JSON.stringify(input)) as GameActionOperation;await current(proof);
    if(!offlineWrites.has(proof)||!scoring.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
-   if(operation.kind!=='action'||!['score','select'].includes(operation.command?.action))throw new OutboxError('INVALID_OPERATION','Only scores and player selection are available here.');
+   if(operation.kind!=='action'||!['score','select','finish','resume'].includes(operation.command?.action))throw new OutboxError('INVALID_OPERATION','This game action is not available here.');
+   if(['finish','resume'].includes(operation.command.action)&&!completion.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
    const outbox=api.outbox(proof);
    try{
     await outbox.enqueue(operation,true);

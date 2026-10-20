@@ -25,6 +25,7 @@ export async function openGameScreen(pilot:RepositoryPilot,scope:ReadScope|null,
  return observeGameScreen(pilot,scope,gameId,await fetchGame());
 }
 export function gameScreenMessage(read:AccountGameRead|null):{title:string;detail:string}{
+ if(read?.kind==='game'&&read.view.game.finished&&read.canChangeCompletion)return {title:read.sync==='pending'?'Game finished on this device':'Game complete',detail:'Your scores are kept. Resume to continue scoring. Use Sync now to send device changes to your account.'};
  if(read?.kind==='game'&&read.canScore)return {title:read.sync==='pending'?'Scores saved on this device':'Ready to keep score',detail:'Scores save here first. Use Sync now to send them to your account. Game settings and history are view only.'};
  if(read?.kind==='game'&&read.scoreAccess==='connect')return {title:'Saved copy · view only',detail:'Reconnect to verify account scoring support before entering scores. Your saved games and device games remain available.'};
  if(read?.kind==='game'&&read.scoreAccess==='untracked')return {title:'Saved copy · view only',detail:'Enable score entry to use this saved copy. Scores will save on this device first; Sync now sends them to your account.'};
