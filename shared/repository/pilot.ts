@@ -52,6 +52,12 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
     const value=await (options.scoringEnabled?access.readScoringGame(lease,gameId):access.readGame(lease,gameId));valid(scope);return value;
    }catch(error){invalidate(scope,error);throw error}
   })},
+  prepareScoring(scope:ReadScope|null,input:GameView,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameView;return serial(async()=>{
+   if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;
+   if(captured.profileId!==expectedProfileId)throw Object.assign(new Error('Account changed. Reopen the game before preparing score entry.'),{code:'SCORING_BINDING_CHANGED'});
+   const {access}=await repository();valid(scope);
+   try{const read=await access.prepareScoring(captured,detached);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
+  })},
   enqueueScoring(scope:ReadScope|null,input:GameActionOperation,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameActionOperation;return serial(async()=>{
    if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;if(captured.profileId!==expectedProfileId)throw Object.assign(new Error('This save belongs to a different account profile. Its input has been kept.'),{code:'SCORING_BINDING_CHANGED'});const {access}=await repository();valid(scope);
    try{const read=await access.enqueueScoring(captured,detached);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
