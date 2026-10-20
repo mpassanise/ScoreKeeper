@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-20
-Status: Local-first scoring and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
+Status: Local-first scoring, Finish/Resume and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -14,7 +14,7 @@ This tracks delivered capabilities, not a percentage of effort or a fixed PR cou
 | Connection/auth UX | Implemented on web/iPhone | Real auth and first-launch acceptance |
 | Durable device repositories | Implemented on web/iPhone | Physical-device interruption/restart and privacy/erasure acceptance |
 | Replay-safe API/recovery | Implemented, migrations 004/005 previously applied | Two-device/old-client failure matrix and unresolved collision/deletion policies |
-| Local-first game actions | Basic scoring/selection and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
+| Local-first game actions | Basic scoring/selection, Finish/Resume and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
 | Background sync and rollout | Manual delivery bridge implemented | Automatic bounded scheduler, cross-device acceptance, staged web/TestFlight rollout |
 | Performance/scale | Bounded queue/read-model safeguards implemented | Delta/pagination design, telemetry, sustained load/latency measurements |
 
@@ -391,3 +391,15 @@ Validation extends both IndexedDB and desktop SQLite scoring suites with prepara
 Next: remaining targeted queued actions, then source adoption/import. Durable cold-start write permission, automatic background delivery, unresolved collision/deletion policy, privacy/retention and browser/device/performance acceptance remain distinct gates. Keep production flags disabled.
 
 Architect review (increment 14): reviewed the complete final diff for lifecycle/profile isolation, immutable snapshot binding, CAS/collision guards, pending operations/receipt preservation, unknown local acknowledgement retry, deletion suppression, and equivalent web/iPhone handlers. No blocking code finding remains. Preparation performs only local I/O; server freshness is checked by existing expected-version delivery rather than assumed from a cached view. UI hides preparation on known review states. Automated coverage includes actual shell-handler account/activity/selection races. Local mobile typecheck is blocked by an existing dangling AsyncStorage dependency symlink; clean GitHub mobile CI is required. Physical-iPhone/browser acceptance remains open.
+
+### Phase 3 continuation — increment 15: queued Finish and Resume
+
+PR #78 is merged. Extend the existing disabled scoring pilot with Finish game and Resume for already-tracked account games on web/iPhone. Require the existing verified scoring grant plus separately captured capability advertising both finish and resume. Score/select-only APIs cannot enable completion actions. Cold restored leases remain read-only. No new flag or production activation is introduced.
+
+Use the same immutable intent, profile binding, expected version, atomic queue/projection commit, ambiguous-save retry and delivery/recovery pipeline. Finish and Resume allocate one operation ID and no score entry ID. Preserve all entries, totals and unsent score input; only successful score entry clears matching input. Both shells update completion state and minimal home summaries only after local persistence, guard late account/activity/selection results and suppress deletion. Finish hides scoring controls; Resume restores them after its local commit. Known uncertain/applied/rejected/collision/deletion states pause completion actions just like scores. New Finish requires an unfinished projection; Resume requires a finished projection. Existing automatic-ending rules reject an impermissible Resume without changing queue state. No legacy mutation fallback is permitted.
+
+New coverage runs production IndexedDB/desktop SQLite paths for finish/resume transitions, timestamps, exact repeated requests, entries/totals preservation, capability denial, automatic-limit rejection and original-wire retry after both the Finish commit acknowledgement and confirmation read are lost. Reconnect retry uses the original operation once, then Resume uses a fresh intent. Actual web/iPhone save-handler races cover all three score/finish/resume intents and verify completion never clears score drafts. Existing queue/read-model/scoring and broader CI checks remain required.
+
+Architect review of the complete final diff covers lifecycle/capability isolation, authoritative queue admission, expected versions, original IDs/receipt retention, unknown outcomes, archive/deletion preservation, local I/O performance and platform parity. Avoid duplicate scoring-content validation while deriving score/completion eligibility. Pause completion permission alongside scoring when adopting an error-state read; distinguish intentionally finished games from connectivity failure. No blocking code finding remains. Browser/physical-iPhone layout/focus/accessibility/dark mode, real auth, two-device and interruption acceptance remain unverified.
+
+Scope remains prepared/tracked account games. Previously untracked finished account copies remain view-only; this increment does not broaden cache preparation or add adoption/import. Undo, targeted entry edits, safe rule edits and queued deletion remain subsequent action increments. Then source adoption/import, durable cold-start write permission, automatic background delivery, unresolved conflict/deletion policies, privacy/erasure, staged rollout and sustained performance acceptance remain open. All production flags stay disabled. No migration, API deployment or paid Expo build is required to merge this gated increment.
