@@ -3,6 +3,8 @@
 Status: pending real-device acceptance; all rollout flags stay disabled.
 Baseline: PR #87 (automatic foreground sync plus native connectivity recovery). Automated tests are evidence for code behavior, not a substitute for this matrix.
 
+Use [the device pilot runbook](OFFLINE_PILOT_DEVICE_RUNBOOK.md) to choose the test target and check build settings before spending an EAS build. Its profile fragment is proposed, not applied.
+
 ## Preconditions
 
 - Use a test account and isolated browser profiles/devices with recoverable game data. Record client commit/binary version, API version/capabilities and effective pilot flags for every run.
