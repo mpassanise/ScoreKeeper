@@ -6,4 +6,4 @@ export type AccountGameRead=
  | {kind:'missing'}
  | {kind:'deleted';serverVersion:number}
  | {kind:'pending-delete';sync:'pending'|'needs-review';pendingOperations:number;serverVersion:number|null}
- | {kind:'game';source:'queue'|'cache';sync:'confirmed'|'pending'|'needs-review';view:GameView;pendingOperations:number;serverVersion:number|null};
+ | {kind:'game';source:'queue'|'cache';sync:'confirmed'|'pending'|'needs-review';view:GameView;canScore?:boolean;scoreProfileId?:string;scoreAccess?:'ready'|'connect'|'untracked'|'paused';pendingOperations:number;serverVersion:number|null};

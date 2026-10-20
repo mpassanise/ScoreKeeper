@@ -1,3 +1,4 @@
+import type {GameActionOperation} from '../game-operation-contract';
 import type {AccountStatus,GameView,GameSummary} from '../api';
 import {AccountAccessError} from './account-access';
 import type {ConfirmedGames} from './confirmed-games';
@@ -9,8 +10,8 @@ import {stageLegacyGames} from './legacy-staging';
 export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
 /** Gated account repository pilot. Manual delivery is separately disabled;
- * no live scoring writer or automatic adoption/replay is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+ * score admission has its own flag; no automatic adoption/replay is activated. */
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
@@ -48,8 +49,12 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
    const {access}=await repository();valid(scope);
    try{
     if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
-    const value=await access.readGame(lease,gameId);valid(scope);return value;
+    const value=await (options.scoringEnabled?access.readScoringGame(lease,gameId):access.readGame(lease,gameId));valid(scope);return value;
    }catch(error){invalidate(scope,error);throw error}
+  })},
+  enqueueScoring(scope:ReadScope|null,input:GameActionOperation,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameActionOperation;return serial(async()=>{
+   if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;if(captured.profileId!==expectedProfileId)throw Object.assign(new Error('This save belongs to a different account profile. Its input has been kept.'),{code:'SCORING_BINDING_CHANGED'});const {access}=await repository();valid(scope);
+   try{const read=await access.enqueueScoring(captured,detached);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
   readHome(scope:ReadScope|null,seeds:GameSummary[]){const detached=JSON.parse(JSON.stringify(seeds)) as GameSummary[];return serial(async()=>{
    if(!options.enabled||!options.recoveryEnabled)return null;if(!scope)throw stale();valid(scope);
@@ -64,7 +69,7 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
    const {access}=await repository();valid(scope);
    try{
     if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
-    const result=await access.readRecovery(lease,gameId);valid(scope);if(!options.collisionResolutionEnabled)result.review.canCheckCollision=false;
+    const result=await access.readRecovery(lease,gameId);valid(scope);if(!options.collisionResolutionEnabled)result.review.canCheckCollision=false;if(options.scoringEnabled)result.review.read=await access.readScoringGame(lease,gameId);valid(scope);
     if(result.review.canChooseAccount&&result.revision!==null)reviews.set(result.review,{scope,lease,gameId,revision:result.revision,resolutionId});
     return result.review;
    }catch(error){invalidate(scope,error);throw error}
@@ -76,13 +81,13 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   resolveCollision(scope:ReadScope|null,review:GameRecoveryReview){return serial(async()=>{
    if(!options.enabled||!options.recoveryEnabled||!options.collisionResolutionEnabled||!scope)throw stale();valid(scope);
    const preview=collisionReviews.get(review);if(!preview||preview.scope!==scope||preview.lease!==lease)throw stale();stopDelivery();const {access}=await repository();valid(scope);
-   try{const read=await access.resolveCollision(preview.lease,preview.gameId,preview.ticket);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
+   try{const picked=await access.resolveCollision(preview.lease,preview.gameId,preview.ticket);const read=options.scoringEnabled?await access.readScoringGame(preview.lease,preview.gameId):picked;valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
   chooseAccountRecovery(scope:ReadScope|null,review:GameRecoveryReview){return serial(async()=>{
    if(!options.enabled||!options.recoveryEnabled||!scope)throw stale();valid(scope);
    const ticket=reviews.get(review);if(!ticket||ticket.scope!==scope||ticket.lease!==lease)throw stale();stopDelivery();
    const {access}=await repository();valid(scope);
-   try{const read=await access.chooseAccountRecovery(ticket.lease,ticket.gameId,ticket.revision,ticket.resolutionId);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
+   try{const picked=await access.chooseAccountRecovery(ticket.lease,ticket.gameId,ticket.revision,ticket.resolutionId);const read=options.scoringEnabled?await access.readScoringGame(ticket.lease,ticket.gameId):picked;valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
   manualDeliver(scope:ReadScope|null,request:ManualDeliveryRequest):Promise<DeliveryState>{
    if(!options.enabled||!options.deliveryEnabled)return Promise.resolve({phase:'disabled'});
