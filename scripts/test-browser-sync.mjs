@@ -59,6 +59,7 @@ try{
    async enqueue(op){return access.enqueueScoring(lease,op)},
    async read(id){return access.readScoringGame(lease,id)},
    async queue(){return access.outbox(lease).read()},
+   async prepareDispatch(id,cap){try{return {wire:await access.outbox(lease).prepareDelivery(id,cap)}}catch(error){return {code:error.code}}},
    async recovery(id){return access.readRecovery(lease,id)},
    async choose(id,revision,decision){return access.chooseAccountRecovery(lease,id,revision,decision)},
    async deliver(){worker=access.httpDelivery(lease,location.origin,async()=> 'fixture-A:'+tag,{enabled:true,retryDelayMs:0,stepTimeoutMs:3000,passTimeoutMs:15000});try{return await worker.connect()}finally{worker.close()}},
@@ -71,7 +72,12 @@ try{
  const a=await browser.newContext(),b=await browser.newContext();contexts.push(a,b);const a1=await page(a),a2=await page(a),b1=await page(b);
  await call(a1,'open',status,initial);await call(a2,'open',status,null);await call(b1,'open',status,initial);
  const first=score(initial,5);await call(a1,'enqueue',first);
- // Separate pages share actual browser IndexedDB; both workers may replay a head.
+ // Competing queued -> uncertain writes may legitimately lose a local CAS.
+ // Finish that durable transition before requiring both HTTP workers to arrive;
+ // otherwise the fixture deadlocks waiting for a worker paused by STORAGE_CONFLICT.
+ const dispatch=await Promise.all([call(a1,'prepareDispatch',initial.game.id,cap),call(a2,'prepareDispatch',initial.game.id,cap)]);
+ const admitted=dispatch.filter(result=>result.wire);assert.ok(admitted.length>=1);assert.ok(dispatch.every(result=>result.wire||result.code==='STORAGE_CONFLICT'));assert.ok(admitted.every(result=>result.wire===admitted[0].wire));
+ // Both production workers now replay the same retained uncertain head.
  await Promise.all([call(a1,'deliver'),call(a2,'deliver')]);
  for(let i=0;i<3&&(await call(a1,'read',initial.game.id)).pendingOperations;i++)await call(a1,'deliver');
  assert.equal(senders.size,2,'both tab workers must send before the first commit');assert.equal(effects,1);assert.equal(remote.game.entries.length,1);assert.equal(remote.game.entries[0].id,first.command.entryId);const replays=wires.filter(w=>JSON.parse(w).operationId===first.operationId);assert.ok(replays.length>=2,'lost reply/concurrent workers replay original request');assert.ok(replays.every(w=>w===replays[0]),'every replay uses identical retained bytes');assert.equal((await call(a1,'read',initial.game.id)).sync,'confirmed');

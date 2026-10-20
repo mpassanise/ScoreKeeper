@@ -3,6 +3,8 @@
 Status: pending real-device acceptance; all rollout flags stay disabled.
 Baseline: PR #87 (automatic foreground sync plus native connectivity recovery). Automated tests are evidence for code behavior, not a substitute for this matrix.
 
+Use [the device pilot runbook](OFFLINE_PILOT_DEVICE_RUNBOOK.md) to choose the test target and check build settings before spending an EAS build. Its profile fragment is proposed, not applied.
+
 ## Preconditions
 
 - Use a test account and isolated browser profiles/devices with recoverable game data. Record client commit/binary version, API version/capabilities and effective pilot flags for every run.
@@ -52,3 +54,6 @@ This is supporting automated evidence for portions of the matrix, not completion
 | Cross-tab sign-out and confirmed deletion/page reload | Passed: stale write denied, tombstone retained and before-delete history preserved |
 
 No production-client or native linking result is inferred from these controlled assertions. Full CI on the final PR head is recorded in PR #88; documentation-only evidence updates do not change the tested browser source.
+
+
+PR #89 follow-up: a later CI run exposed an intermittent fixture deadlock when one of two workers lost the initial queued-to-uncertain CAS and correctly stopped before HTTP. The test now races that durable preparation explicitly (only identical retained wires or STORAGE_CONFLICT are allowed), then exercises both HTTP workers against the already-uncertain operation. This separates local admission contention from transport replay and retains the two-sender, exact-byte and one-effect assertions. It is a test-harness correction, not a production retry-policy change. Final-head CI evidence is recorded in PR #89; the device/auth gates remain pending.
