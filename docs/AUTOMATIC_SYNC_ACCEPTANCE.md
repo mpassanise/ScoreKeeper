@@ -1,7 +1,7 @@
 # Automatic foreground sync acceptance
 
 Status: pending real-device acceptance; all rollout flags stay disabled.
-Baseline: PR #86 plus native connectivity recovery. Automated tests are evidence for code behavior, not a substitute for this matrix.
+Baseline: PR #87 (automatic foreground sync plus native connectivity recovery). Automated tests are evidence for code behavior, not a substitute for this matrix.
 
 ## Preconditions
 
@@ -33,3 +33,12 @@ Record timestamps, visible sync state, sanitized diagnostic stage/code and durat
 ## Exit and rollout
 
 All rows need recorded results and resolved blocking defects/policies before activation. First authorize an isolated browser/device pilot; then stage web and TestFlight cohorts with explicit stop criteria for lost/duplicate history, account leakage, unexpected deletion, save failures or sustained latency. Disabling new scheduling must preserve queued data and account-copy authority; do not fall back to legacy mutation writers. Reconcile/drain or retain local use with sync paused. API/schema readiness must be checked against actual deployed capabilities, not inferred from merges. OS background execution and scale work remain separate.
+
+
+## Automated browser repository evidence
+
+A dedicated `browser-sync` CI job runs `node scripts/test-browser-sync.mjs` with pinned Playwright/Chromium, actual IndexedDB transactions and the production durable-account/HTTP delivery code. The localhost HTTP fixture serializes commit/receipt outcomes and intentionally loses a committed response. It uses synthetic account/game data; it is not the deployed C# API, SQL, Entra or complete application UI.
+
+Execution is pending on this iteration's exact CI head. The local browser download failed, so no local Chromium pass is claimed. The suite covers two same-origin tabs delivering one immutable operation, two isolated browser stores conflicting at the same game version, explicit repeatable account-copy recovery with both histories retained, cold repository reopen and local save while browser networking is offline, reconnect delivery with original entry IDs, cross-tab sign-out, and deletion/tombstone/recovery retention across page reload. The test never clears storage as a recovery step. Browser contexts are disposable test stores only.
+
+This is supporting automated evidence for portions of the matrix, not completion of any full-app/device row. Every physical-device/production-auth/manual row above remains pending. Next collect a new iPhone binary and isolated browser/device run results, including effective flags and actual API capabilities, before authorizing rollout.
