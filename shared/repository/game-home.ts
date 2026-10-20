@@ -1,21 +1,21 @@
 import type {GameSummary} from '../api';
 import type {AccountGameRead} from './game-read-model';
 import type {GameOutbox} from './game-outbox';
-import {gameRead} from './game-outbox';
+import {gameRead,importedGameIds} from './game-outbox';
 import {LocalRepositoryError,canonical} from './confirmed-games';
 import type {AtomicDocuments,DocumentGuard} from './documents';
 
 export type HomeGame={gameId:string;summary:GameSummary|null;sync:'confirmed'|'pending'|'needs-review';hidden:'pending-delete'|'deleted'|null;retained:boolean;name:string;canDelete?:boolean};
-export type AccountGameHome={profileId?:string;games:GameSummary[];savedCopies:HomeGame[];states:Record<string,HomeGame>};
+export type AccountGameHome={profileId?:string;adoptedGameIds?:string[];games:GameSummary[];savedCopies:HomeGame[];states:Record<string,HomeGame>};
 export function gameSummary(view:Extract<AccountGameRead,{kind:'game'}>['view']):GameSummary{
  return cleanSummary({...view.game,turnCount:view.game.entries.length});
 }
 /** One validated queue snapshot. List omission is never deletion proof. No
  * history/receipt payloads leave this reader, and device-only rows stay separate. */
-export function queueHome(state:GameOutbox,seeds:GameSummary[]):HomeGame[]{
+export function queueHome(state:GameOutbox,seeds:GameSummary[],adoptedGameIds:readonly string[]=importedGameIds(state)):HomeGame[]{
  const rows=new Map<string,HomeGame>();
  for(const seed of seeds)if(!seed.deviceOnly)rows.set(seed.id,{gameId:seed.id,summary:seed,sync:'confirmed',hidden:null,retained:false,name:seed.name});
- const retained=new Set(state.archive.filter(b=>b.kind==='account-selected'&&b.recovery).map(b=>b.gameId));
+ const retained=new Set([...adoptedGameIds,...state.archive.filter(b=>b.kind==='account-selected'&&b.recovery).map(b=>b.gameId)]);
  for(const game of state.games){
   const read=gameRead(game),prior=rows.get(game.gameId),copy=game.projection??game.base?.view??game.candidate?.view;
   rows.set(game.gameId,{gameId:game.gameId,summary:read.kind==='game'?gameSummary(read.view):null,sync:read.kind==='game'||read.kind==='pending-delete'?read.sync:'confirmed',hidden:read.kind==='deleted'?'deleted':read.kind==='pending-delete'?'pending-delete':null,retained:retained.has(game.gameId),name:copy?.game.name??prior?.name??'Saved game'});

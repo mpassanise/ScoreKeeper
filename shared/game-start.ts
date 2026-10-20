@@ -18,4 +18,4 @@ export async function startGame({local,cloud,signedIn,deviceOnly=false,name,play
  }}
  return {view:await local.create(uuid(),name,clean,winner,rules,{deviceOnly}),deviceOnly,message:deviceOnly?'Game started on this device. Your scores are saved here.':''};
 }
-export function mergeDeviceGames(saved:GameSummary[],locals:GameSummary[]){const device=locals.filter(g=>g.deviceOnly);const ids=new Set(device.map(g=>g.id));return [...device,...saved.filter(g=>!ids.has(g.id))].sort((a,b)=>Date.parse(b.updated)-Date.parse(a.updated))}
+export function mergeDeviceGames(saved:GameSummary[],locals:GameSummary[],accountAuthority:readonly string[]=[]){const adopted=new Set(accountAuthority);const device=locals.filter(g=>g.deviceOnly&&!adopted.has(g.id));const ids=new Set(device.map(g=>g.id));return [...device,...saved.filter(g=>!ids.has(g.id))].sort((a,b)=>Date.parse(b.updated)-Date.parse(a.updated))}
