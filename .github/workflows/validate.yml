@@ -105,4 +105,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: npm ci --prefix tests/browser --ignore-scripts --no-audit --no-fund
       - run: node tests/browser/node_modules/playwright/cli.js install --with-deps chromium
-      - run: node scripts/test-browser-sync.mjs
+      - name: Repeat browser sync races
+        run: |
+          for attempt in 1 2 3; do
+            node scripts/test-browser-sync.mjs
+          done
