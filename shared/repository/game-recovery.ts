@@ -10,13 +10,13 @@ export function recoveryReview(gameId:string,read:AccountGameRead,state:GameOutb
  const game=state.games.find(g=>g.gameId===gameId),copies:RecoveryCopy[]=[];
  const add=(id:string,label:string,view:GameView|null,deleted=false,version:number|null=view?.game.version??null)=>copies.push({id,label,view,deleted,version});
  if(read.kind==='game')add('device','On this device',read.view);
- else if(read.kind==='pending-delete'){add('device','On this device',null,true);if(game?.base)add('before-delete','Before device deletion',game.base.view)}
- else if(read.kind==='deleted')add('deleted','Account deletion confirmed',null,true,read.serverVersion);
+ else if(read.kind==='pending-delete'){add('device','On this device',null,true);if(game?.beforeDelete||game?.base)add('before-delete','Before device deletion',game.beforeDelete??game.base!.view)}
+ else if(read.kind==='deleted'){add('deleted','Account deletion confirmed',null,true,read.serverVersion);if(game?.beforeDelete)add('before-delete','Before device deletion',game.beforeDelete)}
  if(collision){add('retained','Earlier account copy',collision.retained.view);add('observed','Conflicting account copy',collision.observed.view)}
  else if(conflict){if('deleted'in conflict.account)add('account','Account copy',null,true,conflict.account.version);else add('account','Account copy',conflict.account.view)}
  else if(game?.candidate)add('account','Last account copy',game.candidate.view);
  for(const batch of [...state.archive].reverse())if(batch.gameId===gameId&&batch.kind==='account-selected'&&batch.recovery){
-  add(batch.id,batch.recovery.projection?'Retained device copy':'Before device deletion',batch.recovery.projection??batch.recovery.base?.view??null,!batch.recovery.projection&&!batch.recovery.base);
+  add(batch.id,batch.recovery.projection?'Retained device copy':'Before device deletion',batch.recovery.beforeDelete??batch.recovery.projection??batch.recovery.base?.view??null,!batch.recovery.beforeDelete&&!batch.recovery.projection&&!batch.recovery.base);
  }
  for(const d of [...history].reverse()){add(d.id+'-retained','Archived account copy',d.pair.retained.view);add(d.id+'-observed','Archived conflicting copy',d.pair.observed.view);if(d.prior)add(d.id+'-prior','Before collision resolution',d.prior.view);add(d.id+'-selected','Chosen newer account copy',d.selected.view)}
  const uncertain=!!game?.operations.some(op=>op.status==='uncertain');

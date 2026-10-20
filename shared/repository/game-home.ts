@@ -5,8 +5,8 @@ import {gameRead} from './game-outbox';
 import {LocalRepositoryError,canonical} from './confirmed-games';
 import type {AtomicDocuments,DocumentGuard} from './documents';
 
-export type HomeGame={gameId:string;summary:GameSummary|null;sync:'confirmed'|'pending'|'needs-review';hidden:'pending-delete'|'deleted'|null;retained:boolean;name:string};
-export type AccountGameHome={games:GameSummary[];savedCopies:HomeGame[];states:Record<string,HomeGame>};
+export type HomeGame={gameId:string;summary:GameSummary|null;sync:'confirmed'|'pending'|'needs-review';hidden:'pending-delete'|'deleted'|null;retained:boolean;name:string;canDelete?:boolean};
+export type AccountGameHome={profileId?:string;games:GameSummary[];savedCopies:HomeGame[];states:Record<string,HomeGame>};
 export function gameSummary(view:Extract<AccountGameRead,{kind:'game'}>['view']):GameSummary{
  return cleanSummary({...view.game,turnCount:view.game.entries.length});
 }
