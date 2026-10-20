@@ -5,6 +5,7 @@ import {openConfirmedGames} from '../../shared/repository/indexeddb-confirmed-ga
 import {guestKey} from '../../shared/local-games';
 const enabled=process.env.NEXT_PUBLIC_CONFIRMED_CACHE_PILOT==='true';
 const recovery=process.env.NEXT_PUBLIC_GAME_SCREEN_PILOT==='true'&&process.env.NEXT_PUBLIC_GAME_RECOVERY_PILOT==='true';
+const delivery=recovery&&process.env.NEXT_PUBLIC_GAME_DELIVERY_PILOT==='true';
 const staging=process.env.NEXT_PUBLIC_LEGACY_STAGING_PILOT==='true';
 const channelName='scorekeeper-repository-invalidated';
 export function useRepositoryPilot(onInvalidated:()=>void){
@@ -13,7 +14,7 @@ export function useRepositoryPilot(onInvalidated:()=>void){
  useEffect(()=>{
   if(!enabled)return;
   const channel=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel(channelName);
-  const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:recovery,open:()=>openConfirmedGames(indexedDB),onInvalidated:()=>callback.current(),publish:()=>{channel?.postMessage('changed');try{localStorage.setItem(channelName,crypto.randomUUID())}catch{/* Focus recheck remains available. */}}});ref.current=pilot;
+  const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:recovery,deliveryEnabled:delivery,open:()=>openConfirmedGames(indexedDB),onInvalidated:()=>callback.current(),publish:()=>{channel?.postMessage('changed');try{localStorage.setItem(channelName,crypto.randomUUID())}catch{/* Focus recheck remains available. */}}});ref.current=pilot;
   const recheck=()=>{void pilot.recheck().catch(error=>{if(ref.current===pilot&&(error as {code?:string})?.code!=='STALE_ACCOUNT')callback.current()})};
   const storage=(e:StorageEvent)=>{if(e.key===channelName)recheck()};
   channel?.addEventListener('message',recheck);window.addEventListener('storage',storage);window.addEventListener('focus',recheck);

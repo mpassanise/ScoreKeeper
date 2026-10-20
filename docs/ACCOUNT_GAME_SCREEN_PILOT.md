@@ -42,3 +42,6 @@ The shared durable account observation boundary retains a validated pair of cont
 This evidence currently protects the read-only screen/observation boundary. Before enabling any queued writer or delivery worker, integrate collision review with its write/delivery gates and explicit resolution/archive policy; neither worker nor writer is activated here. Existing queue receipt/content review remains unchanged. Regression checks cover cached and tracked collisions, preserved source bytes, reopen/restart, newer refreshes, account isolation, corrupted evidence, failed commits and lifecycle revocation on IndexedDB and desktop SQLite. Physical iPhone/browser acceptance remains open.
 
 Recovery continuation: [explicit saved-copy recovery pilot](ACCOUNT_GAME_RECOVERY_PILOT.md) adds a separately disabled inspection/confirmation boundary on both clients. The screen pilot alone still grants no recovery-decision capability.
+
+
+Continuation: [captured-account manual delivery pilot](MANUAL_GAME_DELIVERY_PILOT.md) adds a separate default-false application delivery flag. Ordinary account clients remain read-only; only explicit manual actions with every prerequisite pilot enabled can invoke the dedicated immutable-operation transport. Startup/foreground refreshes do not replay queues. Production settings remain disabled.

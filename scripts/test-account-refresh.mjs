@@ -20,6 +20,12 @@ try{
  for(const status of [{profileId:'B',deletionStatus:null},{profileId:'A',deletionStatus:'pending'}]){
   events.length=0;let observed=null;await assert.rejects(()=>readAccountSnapshot({api:{...api,account:async()=>status},expectedProfileId:'A',isCurrent:()=>true,step,onAccountStatus:async value=>{observed=value}}));assert.deepEqual(events,[],'identity/deletion failure never starts game reads');assert.equal(observed,status,'pilot receives lifecycle denials before refresh aborts');
  }
+ // Manual work and game-id resolution must follow complete account validation,
+ // while the lifecycle observer still receives denial evidence.
+ for(const status of [{profileId:'B',deletionStatus:null},{profileId:'A',deletionStatus:'pending'}]){
+  let manual=0,resolved=0,observed=0;await assert.rejects(()=>readAccountSnapshot({api:{...api,account:async()=>status},expectedProfileId:'A',isCurrent:()=>true,step,onAccountStatus:async()=>{observed++},afterAccountVerified:async()=>{manual++},resolveGameId:async id=>{resolved++;return id}}));assert.equal(observed,1);assert.equal(manual,0);assert.equal(resolved,0);
+ }
+ const order=[];await readAccountSnapshot({api:{account:async()=>({profileId:'A',deletionStatus:null}),list:async()=>{order.push('list');return []},get:async()=>assert.fail('known deleted game must not be read')},expectedProfileId:'A',gameId:'deleted',isCurrent:()=>true,step,onAccountStatus:async()=>{order.push('status')},afterAccountVerified:async()=>{order.push('manual')},resolveGameId:async()=>{order.push('resolve');return undefined}});assert.deepEqual(order,['status','manual','resolve','list']);
  let valid=true;const stale=deferred();events.length=0;
  const switching=readAccountSnapshot({api:{...api,account:()=>stale.promise},expectedProfileId:'A',isCurrent:()=>valid,step});valid=false;stale.resolve({profileId:'A',deletionStatus:null});assert.equal(await switching,null);assert.deepEqual(events,[]);
  valid=true;const gameWait=deferred();const late=readAccountSnapshot({api:{account:async()=>({profileId:'A',deletionStatus:null}),list:()=>gameWait.promise,get:api.get},isCurrent:()=>valid,step});await turn();valid=false;gameWait.resolve([]);assert.equal(await late,null,'late games cannot populate a switched account');

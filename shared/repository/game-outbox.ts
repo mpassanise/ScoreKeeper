@@ -4,6 +4,7 @@ import {LocalGames,gameView} from '../local-games';
 import {canonical,checkStored,LocalRepositoryError,snapshot,type ConfirmedSnapshot} from './confirmed-games';
 import type {AtomicDocuments,DocumentGuard} from './documents';
 import type {AccountGameRead} from './game-read-model';
+import {readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
 
 // One bounded read-model cache per open repository. Mutable queue/write paths
 // always decode independently; callers never receive references to this cache.
@@ -162,25 +163,31 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
   await access.authorize(mode);return {auth,key,mode,revision:record?.revision??0,state};
  }
  async function save(context:Awaited<ReturnType<typeof read>>,guards:readonly DocumentGuard[]=[]){await access.authorize(context.mode);const size=utf8Size(JSON.stringify(context.state)),reserve=context.state.games.reduce((n,g)=>n+g.operations.reduce((m,item)=>m+transitionReserve(item),0),0);if(context.state.archive.reduce((n,b)=>n+b.operations.length,0)>10000||context.state.archive.length>10000||context.state.games.length>50||context.state.games.reduce((n,g)=>n+g.operations.length,0)>500||size+reserve>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await decode(context.state,context.auth.profileId);await access.authorize(context.mode);await documents.write(context.key,context.revision,context.state,[context.auth.guard,...guards]);await access.authorize(context.mode)}
+ async function collisionGuard(auth:{profileId:string},gameId:string){
+  if(await readGameCollision(documents,auth.profileId,gameId))throw new OutboxError('NEEDS_REVIEW','Conflicting account copies require review. Saved changes have been kept.');
+  return {key:gameCollisionKey(auth.profileId,gameId),revision:0};
+ }
  async function settle(ctx:Awaited<ReturnType<typeof read>>,game:QueuedGame){
   if(game.tombstone)return 'deleted' as const;
+  const guard=await collisionGuard(ctx.auth,game.gameId);
   if(game.operations.some(i=>i.status==='rejected'))return 'needs-review' as const;
   if(game.operations.some(i=>i.status!=='applied'))return 'pending' as const;
   const last=game.operations.at(-1),lastOp=last?operationFromWire(last.wire):null;
   if(lastOp?.kind==='delete'){
    if(game.candidate&&game.candidate.serverVersion>=last!.acknowledgement!.committedVersion!)throw new OutboxError('NEEDS_REVIEW','A snapshot cannot resurrect a confirmed deleted game.');
    ctx.state.archive.push({id:lastOp.operationId,gameId:game.gameId,kind:'confirmed',serverVersion:last!.acknowledgement!.committedVersion!,operations:game.operations});
-   game.tombstone={version:last!.acknowledgement!.committedVersion!};game.base=null;game.projection=null;game.operations=[];delete game.candidate;await save(ctx);return 'deleted' as const;
+   game.tombstone={version:last!.acknowledgement!.committedVersion!};game.base=null;game.projection=null;game.operations=[];delete game.candidate;await save(ctx,[guard]);return 'deleted' as const;
   }
   const candidate=game.candidate;if(!candidate)return 'awaiting-snapshot' as const;
   const floor=last?.acknowledgement?.committedVersion??game.base?.serverVersion??0;
   if(candidate.serverVersion<floor)return 'awaiting-snapshot' as const;
   if(last&&candidate.serverVersion===floor&&(!game.projection||scoringContent(candidate.view)!==scoringContent(game.projection)))throw new OutboxError('NEEDS_REVIEW','Confirmed receipt and server scoring content disagree. Both sources have been kept.');
   if(last)ctx.state.archive.push({id:lastOp!.operationId,gameId:game.gameId,kind:'confirmed',serverVersion:candidate.serverVersion,operations:game.operations});
-  game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...candidate.view.game.entries.map(e=>e.id)])];game.base=candidate;game.projection=candidate.view;game.operations=[];delete game.candidate;await save(ctx);return 'confirmed' as const;
+  game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...candidate.view.game.entries.map(e=>e.id)])];game.base=candidate;game.projection=candidate.view;game.operations=[];delete game.candidate;await save(ctx,[guard]);return 'confirmed' as const;
  }
  return {
   async read(){return (await read()).state},
+  async assertDelivery(gameId:string){const auth=await access.authorize('sync');await collisionGuard(auth,gameId);await access.authorize('sync')},
   /** Null means untracked, not deleted. Never replace a tracked result with cache data. */
   async readGame(gameId:string):Promise<AccountGameRead|null>{
    try{
@@ -200,18 +207,19 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
     const value=cached.games.get(gameId);return value?JSON.parse(JSON.stringify(value)) as AccountGameRead:null;
    }catch(error){readCaches.delete(documents);throw error}
   },
-  async seedConfirmed(gameId:string){const ctx=await read('write'),copy=await access.readConfirmed(gameId);if(!copy||copy.profileId!==ctx.auth.profileId||copy.gameId!==gameId)throw new OutboxError('NEEDS_REVIEW','A complete confirmed account snapshot is required.');const existing=ctx.state.games.find(g=>g.gameId===copy.gameId);if(existing){if(canonical(existing.base)!==canonical(copy))throw new OutboxError('NEEDS_REVIEW','Existing pending or confirmed data requires review.');return}ctx.state.games.push({gameId:copy.gameId,base:copy,projection:copy.view,operations:[],reservedEntryIds:copy.view.game.entries.map(e=>e.id)});await save(ctx)},
+  async seedConfirmed(gameId:string){const ctx=await read('write'),guard=await collisionGuard(ctx.auth,gameId),copy=await access.readConfirmed(gameId);if(!copy||copy.profileId!==ctx.auth.profileId||copy.gameId!==gameId)throw new OutboxError('NEEDS_REVIEW','A complete confirmed account snapshot is required.');const existing=ctx.state.games.find(g=>g.gameId===copy.gameId);if(existing){if(canonical(existing.base)!==canonical(copy))throw new OutboxError('NEEDS_REVIEW','Existing pending or confirmed data requires review.');return}ctx.state.games.push({gameId:copy.gameId,base:copy,projection:copy.view,operations:[],reservedEntryIds:copy.view.game.entries.map(e=>e.id)});await save(ctx,[guard])},
   /** Only complete, account-scoped authenticated GET snapshots belong here; never a list omission/404. */
   async observeSnapshot(input:ConfirmedSnapshot){
    const candidate=checkStored(JSON.parse(JSON.stringify(input)),input.profileId,input.gameId),ctx=await read('sync');if(candidate.profileId!==ctx.auth.profileId)throw new LocalRepositoryError('INVALID_SNAPSHOT','Server snapshot belongs to a different account.');const game=ctx.state.games.find(g=>g.gameId===candidate.gameId);
    if(!game)throw new OutboxError('NEEDS_REVIEW','Seed a confirmed base or an explicit creation/import before reconciliation.');
    if(game.tombstone)throw new OutboxError('NEEDS_REVIEW','A refresh cannot resurrect a deleted game.');
+   const guard=await collisionGuard(ctx.auth,game.gameId);
    const prior=game.candidate??game.base;
    if(prior&&candidate.serverVersion<prior.serverVersion)return 'stale' as const;
-   if(prior&&candidate.serverVersion===prior.serverVersion&&snapshotContent(candidate)!==snapshotContent(prior))throw new LocalRepositoryError('VERSION_COLLISION','Different server snapshots have the same version. Both sources require review.');
+   if(prior&&candidate.serverVersion===prior.serverVersion&&snapshotContent(candidate)!==snapshotContent(prior)){await keepGameCollision(documents,ctx.auth.guard,prior,candidate);await access.authorize('sync');throw new LocalRepositoryError('VERSION_COLLISION','Different server snapshots have the same version. Both sources have been kept for review.');}
    game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...candidate.view.game.entries.map(e=>e.id)])];game.candidate=candidate;
    // Commit the candidate separately before attempting compaction: a mismatch must keep both sources.
-   await save(ctx);const latest=await read('sync');return settle(latest,latest.state.games.find(g=>g.gameId===game.gameId)!);
+   await save(ctx,[guard]);const latest=await read('sync');return settle(latest,latest.state.games.find(g=>g.gameId===game.gameId)!);
   },
   async settle(gameId:string){const ctx=await read('sync'),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)throw new OutboxError('NEEDS_REVIEW','Unknown queued game.');return settle(ctx,game)},
   async readRecovery(gameId:string){const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);return {state:ctx.state,revision:ctx.revision,conflict:game?reviewOf(game,ctx.revision):null,read:game?gameRead(game):null}},
@@ -228,11 +236,11 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    game.operations=[];delete game.candidate;
    if('deleted'in review.account){game.base=null;game.projection=null;game.tombstone={version:v}}
    else{game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...review.account.view.game.entries.map(e=>e.id)])];game.base=review.account;game.projection=review.account.view}
-   await save(ctx,guards);
+   const guard=await collisionGuard(ctx.auth,gameId);await save(ctx,[guard,...guards]);
   },
   async enqueue(input:GameOperation){
    // Freeze the exact request before any await; caller changes cannot alter retries.
-   const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read('write');
+   const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read('write'),guard=await collisionGuard(ctx.auth,op.gameId);
    const duplicate=ctx.state.games.flatMap(g=>g.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
    if(duplicate){if(duplicate.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID already has a different immutable request.');return}
    if(ctx.state.archive.some(b=>b.kind==='account-selected'&&b.id===op.operationId))throw new OutboxError('OPERATION_ID_REUSED','This operation ID belongs to a retained review decision.');
@@ -251,15 +259,15 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    }
    if(op.kind==='action'&&op.command.action==='score')game.reservedEntryIds.push(op.command.entryId);if(op.kind==='import')game.reservedEntryIds.push(...op.game.entries.map(e=>e.id));
    const localTime=new Date().toISOString();game.projection=await project(op,game.projection,localTime);if(game.projection)snapshot(ctx.auth.profileId,game.projection);
-   game.operations.push({wire,status:'queued',localTime});await save(ctx);
+   game.operations.push({wire,status:'queued',localTime});await save(ctx,[guard]);
   },
   async prepareDelivery(gameId:string,capability:unknown):Promise<string|null>{
-   const ctx=await read('sync'),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)return null;if(contentMismatch(game))throw new OutboxError('NEEDS_REVIEW','Receipt and account content disagree. Delivery is paused.');
+   const ctx=await read('sync'),guard=await collisionGuard(ctx.auth,gameId),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)return null;if(contentMismatch(game))throw new OutboxError('NEEDS_REVIEW','Receipt and account content disagree. Delivery is paused.');
    const item=game.operations.find(i=>i.status!=='applied');if(!item)return null;if(item.status==='rejected')throw new OutboxError('NEEDS_REVIEW','A rejected change blocks automatic replay of its dependants.');
    const op=operationFromWire(item.wire),cap=capability as {version?:number;receipts?:string;atomicGameAndReceipt?:boolean;kinds?:string[];actions?:string[]}|null;
    if(!cap||cap.version!==1||cap.receipts!=='retained'||cap.atomicGameAndReceipt!==true||(op.kind==='action'?!(Array.isArray(cap.actions)&&cap.actions.includes(op.command.action)):!(Array.isArray(cap.kinds)&&cap.kinds.includes(op.kind))))throw new OutboxError('CAPABILITY_REQUIRED','This server has not advertised compatible replay support.');
    // Persist uncertain BEFORE handing bytes to a transport. Process loss/timeout retries these exact bytes.
-   if(item.status!=='uncertain'){item.status='uncertain';await save(ctx)}return item.wire;
+   if(item.status!=='uncertain'){item.status='uncertain';await save(ctx,[guard])}return item.wire;
   },
   async acknowledge(operationId:string,input:OperationAcknowledgement){
    const copy=JSON.parse(JSON.stringify(input)),ctx=await read('sync'),game=ctx.state.games.find(g=>g.operations.some(i=>operationFromWire(i.wire).operationId===operationId));if(!game){const retained=ctx.state.archive.flatMap(b=>b.operations).find(i=>operationFromWire(i.wire).operationId===operationId);if(retained?.acknowledgement&&canonical(retained.acknowledgement)===canonical(copy))return;throw new OutboxError('INVALID_ACKNOWLEDGEMENT','Unknown or conflicting retained operation.')}

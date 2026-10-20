@@ -37,7 +37,9 @@ try{
   assert.equal(await observe(gameView(g)),'stale');assert.equal((await out.read()).games.find(x=>x.gameId===g.id).base.serverVersion,2);
   await rejects(()=>observe(gameView({...server.game,name:'Collision'})),'VERSION_COLLISION');
   // A later authoritative version can include another device's undo; local entry reservations remain burned.
-  const newer=gameView({...server.game,version:3,entries:[],updated:'2026-10-19T02:00:00Z'});assert.equal(await observe(newer),'confirmed');await rejects(()=>out.enqueue(score(g,3,2,one.command.entryId)),'INVALID_OPERATION');
+  const newer=gameView({...server.game,version:3,entries:[],updated:'2026-10-19T02:00:00Z'});await rejects(()=>observe(newer),'NEEDS_REVIEW');await rejects(()=>out.enqueue(score(g,3,2,one.command.entryId)),'NEEDS_REVIEW');
+  const undoGame=await seed(),undoOp=score(undoGame,1);await applied(undoOp);const undoProjection=(await out.read()).games.find(x=>x.gameId===undoGame.id).projection;await observe(undoProjection);
+  await observe(gameView({...undoProjection.game,version:3,entries:[],updated:'2026-10-19T02:00:00Z'}));await rejects(()=>out.enqueue(score(undoGame,3,2,undoOp.command.entryId)),'INVALID_OPERATION');
   // Same-version scoring content mismatch is retained, not silently adopted.
   const mismatch=await seed(),mismatchOp=score(mismatch,1);await applied(mismatchOp);await rejects(()=>observe(gameView({...mismatch,version:2,updated:'2026-10-19T01:00:00Z'})),'NEEDS_REVIEW');const mismatchState=(await out.read()).games.find(x=>x.gameId===mismatch.id);assert.equal(mismatchState.operations.length,1);assert.equal(mismatchState.candidate.view.game.entries.length,0);assert.equal(mismatchState.projection.game.entries.length,1);await rejects(()=>out.enqueue(score(mismatch,2)),'NEEDS_REVIEW');
   // Conflict selection archives the exact unsent/rejected changes and requires an unchanged review revision.

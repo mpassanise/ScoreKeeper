@@ -71,6 +71,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
     let changed=false;
     try{while(true){
      const current=(await stage('queue',()=>outbox.read())).games.find(g=>g.gameId===original.gameId);if(!current)break;
+     await stage('queue',()=>outbox.assertDelivery(current.gameId));
      if(current.tombstone)break;
      const head=current.operations.find(i=>i.status!=='applied');
      if(head?.status==='rejected'){
@@ -81,7 +82,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
      if(!head){if(current.operations.length){const last=operationFromWire(current.operations.at(-1)!.wire);if(last.kind==='delete')await stage('queue',()=>outbox.settle(current.gameId));else await refreshGame(current.gameId)}break}
      if(confirmed>=budget){if(changed)await refreshGame(current.gameId);break}
      const wire=await stage('queue',()=>outbox.prepareDelivery(current.gameId,cap));if(wire===null)break;
-     const op=operationFromWire(wire),acknowledgement=await retry('operation',s=>session.operation(wire,s));
+     const op=operationFromWire(wire),acknowledgement=await retry('operation',async s=>{await outbox.assertDelivery(current.gameId);return session.operation(wire,s)});
      await stage('queue',()=>outbox.acknowledge(op.operationId,acknowledgement));confirmed++;changed=true;
      if(acknowledgement.outcome==='rejected'){review=true;continue}
      if(op.kind==='delete'){await stage('queue',()=>outbox.settle(current.gameId));break}

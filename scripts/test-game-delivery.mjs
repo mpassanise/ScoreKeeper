@@ -87,7 +87,7 @@ try{
    serverGames.set(healthy.id,structuredClone(healthy));const before=(await out.read()).games.find(g=>g.gameId===blocked.id);let healthyPosts=0;
    const isolated={...session,account:async()=>status(profile),get:async id=>id===blocked.id?gameView({...blocked,name:collision?'Conflicting name':blocked.name,version:collision?1:2}):session.get(id),operation:async(wire,signal)=>{assert.equal(JSON.parse(wire).gameId,healthy.id);healthyPosts++;return session.operation(wire,signal)}};
    worker=access.delivery(lease,{open:async()=>isolated},settings);
-   for(let pass=0;pass<2;pass++){const result=await worker.connect();assert.equal(result.phase,'needs-review');assert.equal(result.code,collision?'VERSION_COLLISION':'NEEDS_REVIEW')}
+   for(let pass=0;pass<2;pass++){const result=await worker.connect();assert.equal(result.phase,'needs-review');assert.equal(result.code,collision&&pass===0?'VERSION_COLLISION':'NEEDS_REVIEW')}
    assert.equal(healthyPosts,1,'healthy changes drain exactly once despite another game requiring review');const after=await out.read(),retained=after.games.find(g=>g.gameId===blocked.id);
    assert.deepEqual(retained.operations,before.operations);assert.deepEqual(retained.projection,before.projection);assert.equal(retained.base.serverVersion,1);if(!collision)assert.equal(retained.candidate.serverVersion,2);
    assert.equal(after.games.find(g=>g.gameId===healthy.id).operations.length,0);worker.close();

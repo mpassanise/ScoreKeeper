@@ -58,6 +58,7 @@ jobs:
       - run: node scripts/test-game-outbox.mjs
       - run: node scripts/test-game-reconciliation.mjs
       - run: node scripts/test-game-delivery.mjs
+      - run: node scripts/test-manual-delivery.mjs
       - run: node scripts/test-game-read-model.mjs
       - run: node scripts/test-game-recovery.mjs
       - run: node scripts/test-repository-pilot.mjs
