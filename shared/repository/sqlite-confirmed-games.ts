@@ -1,4 +1,4 @@
-import {checkDocumentGuard,documentGuards,type DocumentGuard,documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
+import {documentWrites,type DocumentWrite,checkDocumentGuard,documentGuards,type DocumentGuard,documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
 import type {GameView} from '../api';
 import {canonical,checkStored,LocalRepositoryError,requireIdentity,snapshot,type ConfirmedGames,type ConfirmedSnapshot} from './confirmed-games';
 
@@ -64,6 +64,13 @@ export async function openSQLiteConfirmedGames(db:SQLiteConnection):Promise<Conf
  function decodeDocument(row:{revision:number;document:string}){try{return documentRecord({revision:row.revision,value:JSON.parse(row.document)})}catch{throw new LocalRepositoryError('STORAGE_CORRUPT','Repository metadata is invalid. Existing data has been kept.')}}
  return {
   documents:{
+   writeMany(writes:readonly DocumentWrite[],guards?:readonly DocumentGuard[]){const copies=documentWrites(writes),checks=documentGuards(guards);return serialize(async()=>{
+    const results:DocumentRecord[]=[];await db.withExclusiveTransactionAsync(async tx=>{
+     await durable(tx);
+     for(const guard of checks){const row=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',guard.key);checkDocumentGuard(row?decodeDocument(row):undefined,guard)}
+     for(const item of copies){const row=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',item.key);const next=nextDocument(row?decodeDocument(row):undefined,item.expectedRevision,item.value);await tx.runAsync('INSERT INTO repository_metadata (key, revision, document) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, document = excluded.document',item.key,next.revision,JSON.stringify(next.value));results.push(next)}
+    });return results;
+   })},
    read(key:string){requireIdentity(key);return serialize(async()=>{const row=await db.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);return row?decodeDocument(row):null})},
    write(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[]){requireIdentity(key);const copy=documentValue(value),checks=documentGuards(guards);return serialize(async()=>{let result:DocumentRecord;await db.withExclusiveTransactionAsync(async tx=>{await durable(tx);for(const guard of checks){const checked=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',guard.key);checkDocumentGuard(checked?decodeDocument(checked):undefined,guard)}const row=await tx.getFirstAsync<{revision:number;document:string}>('SELECT revision, document FROM repository_metadata WHERE key = ?',key);result=nextDocument(row?decodeDocument(row):undefined,expectedRevision,copy);await tx.runAsync('INSERT INTO repository_metadata (key, revision, document) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision = excluded.revision, document = excluded.document',key,result.revision,JSON.stringify(result.value))});return result!})}
   },

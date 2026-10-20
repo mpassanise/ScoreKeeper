@@ -10,7 +10,7 @@ export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
 /** Gated account repository pilot. Manual delivery is separately disabled;
  * no live scoring writer or automatic adoption/replay is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
@@ -19,6 +19,7 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
  let manual:ManualFlight|null=null;
  function stopDelivery(){const prior=manual;if(prior){prior.controller.abort();prior.worker?.close();if(manual===prior)manual=null}}
  const scopes=new WeakSet<object>();
+ const collisionReviews=new WeakMap<object,{scope:ReadScope;lease:DurableLease;gameId:string;ticket:Pick<Awaited<ReturnType<ReturnType<typeof createDurableAccountRepository>['previewCollisionResolution']>>,'selected'|'decisionId'|'queueRevision'|'collisionRevision'>}>();
  const reviews=new WeakMap<object,{scope:ReadScope;lease:DurableLease;gameId:string;revision:number;resolutionId:string}>();
  const stale=()=>new AccountAccessError('STALE_ACCOUNT');
  function invalidateScope(scope:ReadScope){
@@ -63,10 +64,19 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
    const {access}=await repository();valid(scope);
    try{
     if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
-    const result=await access.readRecovery(lease,gameId);valid(scope);
+    const result=await access.readRecovery(lease,gameId);valid(scope);if(!options.collisionResolutionEnabled)result.review.canCheckCollision=false;
     if(result.review.canChooseAccount&&result.revision!==null)reviews.set(result.review,{scope,lease,gameId,revision:result.revision,resolutionId});
     return result.review;
    }catch(error){invalidate(scope,error);throw error}
+  })},
+  previewCollisionResolution(scope:ReadScope|null,gameId:string,input:GameView,decisionId:string){const detached=JSON.parse(JSON.stringify(input)) as GameView;return serial(async()=>{
+   if(!options.enabled||!options.recoveryEnabled||!options.collisionResolutionEnabled||!scope)throw stale();valid(scope);if(!lease)throw stale();stopDelivery();const captured=lease,{access}=await repository();valid(scope);
+   try{const ticket=await access.previewCollisionResolution(captured,gameId,detached,decisionId);valid(scope);collisionReviews.set(ticket.review,{scope,lease:captured,gameId,ticket:{selected:JSON.parse(JSON.stringify(ticket.selected)),decisionId:ticket.decisionId,queueRevision:ticket.queueRevision,collisionRevision:ticket.collisionRevision}});return ticket.review}catch(error){invalidate(scope,error);throw error}
+  })},
+  resolveCollision(scope:ReadScope|null,review:GameRecoveryReview){return serial(async()=>{
+   if(!options.enabled||!options.recoveryEnabled||!options.collisionResolutionEnabled||!scope)throw stale();valid(scope);
+   const preview=collisionReviews.get(review);if(!preview||preview.scope!==scope||preview.lease!==lease)throw stale();stopDelivery();const {access}=await repository();valid(scope);
+   try{const read=await access.resolveCollision(preview.lease,preview.gameId,preview.ticket);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
   chooseAccountRecovery(scope:ReadScope|null,review:GameRecoveryReview){return serial(async()=>{
    if(!options.enabled||!options.recoveryEnabled||!scope)throw stale();valid(scope);

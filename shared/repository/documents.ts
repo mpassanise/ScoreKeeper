@@ -8,7 +8,12 @@ export function documentGuards(guards:readonly DocumentGuard[]=[]):DocumentGuard
 export function checkDocumentGuard(existing:unknown,guard:DocumentGuard){
  if((existing===undefined?0:documentRecord(existing).revision)!==guard.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Account or repository state changed. Existing data has been kept.');
 }
-export type AtomicDocuments={read:(key:string)=>Promise<DocumentRecord|null>;write:(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[])=>Promise<DocumentRecord>};
+export type DocumentWrite={key:string;expectedRevision:number;value:unknown};
+export function documentWrites(writes:readonly DocumentWrite[]):DocumentWrite[]{
+ if(!Array.isArray(writes)||!writes.length||writes.length>8||new Set(writes.map(w=>w?.key)).size!==writes.length||writes.some(w=>!w||typeof w.key!=='string'||!w.key.trim()||!Number.isSafeInteger(w.expectedRevision)||w.expectedRevision<0))throw new LocalRepositoryError('STORAGE_CONFLICT','Invalid atomic document batch.');
+ return writes.map(w=>({...w,value:documentValue(w.value)}));
+}
+export type AtomicDocuments={writeMany?:(writes:readonly DocumentWrite[],guards?:readonly DocumentGuard[])=>Promise<DocumentRecord[]>;read:(key:string)=>Promise<DocumentRecord|null>;write:(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[])=>Promise<DocumentRecord>};
 export function documentValue(value:unknown):unknown{try{const raw=JSON.stringify(value);if(raw===undefined)throw Error();return JSON.parse(raw)}catch{throw new LocalRepositoryError('STORAGE_CORRUPT','Repository metadata could not be encoded. Existing data has been kept.')}}
 export function documentRecord(value:unknown):DocumentRecord{
  const record=value as DocumentRecord;

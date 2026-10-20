@@ -1,10 +1,10 @@
 import {queueHome,homeResult,retainHomeSummaries} from './game-home';
 import type {AccountStatus,GameView,GameSummary} from '../api';
 import {AccountAccessError} from './account-access';
-import {LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-games';
+import {canonical,LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-games';
 import type {AccountGameRead} from './game-read-model';
 import {recoveryReview} from './game-recovery';
-import {readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
+import {readCollisionFile,checkedCollisionFile,readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
 import {clearGameReadCache,createGameOutbox,OutboxError} from './game-outbox';
@@ -85,25 +85,50 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    await current(proof);const saved=await api.outbox(proof).readHomeState(),rows=queueHome(saved.state,index);
    // Bound concurrent document reads. Never reread/decode the queue per tile.
    for(let i=0;i<rows.length;i+=16)await Promise.all(rows.slice(i,i+16).map(async row=>{
-    if(await readGameCollision(documents,proof.profileId,row.gameId))row.sync='needs-review';
+    const saved=await readCollisionFile(documents,proof.profileId,row.gameId);if(saved.file?.active)row.sync='needs-review';if(saved.file?.history.length)row.retained=true;
    }));
    await current(proof);if((await documents.read('game-outbox:'+proof.profileId))?.revision!==saved.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Saved changes updated. Reconnect to refresh the list.');await current(proof);return homeResult(rows);
   },
   async readRecovery(proof:DurableLease,gameId:string){
-   account(proof);await current(proof);const saved=await api.outbox(proof).readRecovery(gameId),collision=await readGameCollision(documents,proof.profileId,gameId);
+   account(proof);await current(proof);const saved=await api.outbox(proof).readRecovery(gameId),collision=await readCollisionFile(documents,proof.profileId,gameId);
    const read=saved.read?await withReview(proof,gameId,saved.read):await api.readGame(proof,gameId);await current(proof);
    // The ticket uses the review's revision. A concurrent queue update can only
    // make confirmation fail its CAS, never apply a different unseen choice.
-   const review=recoveryReview(gameId,read,saved.state,saved.conflict,collision);
+   const review=recoveryReview(gameId,read,saved.state,saved.conflict,collision.file?.active??null,collision.file?.history??[]);
+   if(!confirmed.has(proof))review.canCheckCollision=false;
    if(review.canChooseAccount&&!confirmed.has(proof)){review.canChooseAccount=false;review.message='Reconnect, then reopen this review to choose an account copy. All saved copies stay available here.'}
    return {review,revision:saved.conflict?saved.revision:null};
+  },
+  async previewCollisionResolution(proof:DurableLease,gameId:string,input:GameView,decisionId:string){
+   account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   const selected=snapshot(proof.profileId,input),saved=await readCollisionFile(documents,proof.profileId,gameId);
+   if(selected.gameId!==gameId||!saved.file?.active||selected.serverVersion<=saved.file.active.retained.serverVersion)throw new OutboxError('NEEDS_REVIEW','A newer account copy is not available yet. Both conflicting copies stay paused.');
+   const prepared=await api.outbox(proof).prepareCollisionResolution(gameId,selected,[...saved.file.active.retained.view.game.entries,...saved.file.active.observed.view.game.entries].map(e=>e.id)),result=await api.readRecovery(proof,gameId);await current(proof);
+   if(!result.review.canCheckCollision)throw new OutboxError('NEEDS_REVIEW','Saved changes updated. Close and reopen this review.');
+   result.review.copies.unshift({id:'new-account',label:'Newer account copy',view:selected.view,version:selected.serverVersion,deleted:false});result.review.canChooseAccount=false;result.review.canCheckCollision=false;result.review.canResolveCollision=true;
+   result.review.message='A newer account copy is available. Review it before confirming. Both conflicting copies and the earlier device base will be archived; no scores will be uploaded or combined.';
+   return {review:result.review,selected,decisionId,queueRevision:prepared.write.expectedRevision,collisionRevision:saved.revision};
+  },
+  async resolveCollision(proof:DurableLease,gameId:string,ticket:{selected:ReturnType<typeof snapshot>;decisionId:string;queueRevision:number;collisionRevision:number}){
+   account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   const selected=snapshot(proof.profileId,ticket.selected.view),saved=await readCollisionFile(documents,proof.profileId,gameId);
+   const completed=saved.file?.history.find(d=>d.id===ticket.decisionId);
+   if(completed){if(canonical(completed.selected)!==canonical(selected))throw new OutboxError('NEEDS_REVIEW','Review decision does not match its retained copy.');return api.readGame(proof,gameId)}
+   if(selected.gameId!==gameId||!saved.file?.active||saved.revision!==ticket.collisionRevision||selected.serverVersion<=saved.file.active.retained.serverVersion)throw new OutboxError('NEEDS_REVIEW','Conflicting copies changed. Close and reopen this review.');
+   const prepared=await api.outbox(proof).prepareCollisionResolution(gameId,selected,[...saved.file.active.retained.view.game.entries,...saved.file.active.observed.view.game.entries].map(e=>e.id));
+   if(prepared.write.expectedRevision!==ticket.queueRevision)throw new LocalRepositoryError('STORAGE_CONFLICT','Saved changes updated. Close and reopen this review.');
+   const next=checkedCollisionFile({...saved.file,active:null,history:[...saved.file.history,{id:ticket.decisionId,pair:saved.file.active,selected,prior:prepared.prior}]});
+   if(!documents.writeMany)throw new LocalRepositoryError('STORAGE_UNAVAILABLE','Atomic recovery storage is unavailable. All copies have been kept.');
+   await current(proof);await documents.writeMany([prepared.write,{key:gameCollisionKey(proof.profileId,gameId),expectedRevision:saved.revision,value:next}],[prepared.guard]);
+   clearGameReadCache(documents);await current(proof);return api.readGame(proof,gameId);
   },
   async chooseAccountRecovery(proof:DurableLease,gameId:string,revision:number,resolutionId:string){
    account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
    const currentReview=await api.readRecovery(proof,gameId);
    const completed=(await api.outbox(proof).read()).archive.some(batch=>batch.id===resolutionId&&batch.kind==='account-selected'&&batch.gameId===gameId);
    if(!completed&&!currentReview.review.canChooseAccount)throw new OutboxError('NEEDS_REVIEW','This game cannot use an account copy yet. All saved copies have been kept.');
-   await api.outbox(proof).useAccountVersion(gameId,revision,resolutionId,[{key:gameCollisionKey(proof.profileId,gameId),revision:0}]);
+   const collision=await readCollisionFile(documents,proof.profileId,gameId);
+   await api.outbox(proof).useAccountVersion(gameId,revision,resolutionId,[{key:gameCollisionKey(proof.profileId,gameId),revision:collision.revision}]);
    await current(proof);return api.readGame(proof,gameId);
   },
   async observeGame(proof:DurableLease,view:GameView):Promise<AccountGameRead>{
