@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 3 increment 8 adds separately disabled read-only account scoring screens for web/iPhone, with API-enforced game-write exclusion. Production flags, replay and live queue writers remain disabled.
+Status: Phase 3 increment 9 adds separately disabled saved-copy recovery for web/iPhone on top of read-only account screens. Production flags, replay and live queue writers remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -10,6 +10,14 @@ Owner: Scorekeeper project. Keep this document as the durable implementation tra
 Opening, resuming and scoring a previously downloaded game must not wait for authentication, the API or SQL. Save changes durably on the device, then sync in the background. Clearly distinguish saved-on-device from confirmed-in-account state. Provide a visible Reconnect action when sync cannot proceed.
 
 Continue using Microsoft Entra External ID and Azure SQL initially. This work separates local interaction from authentication/network availability. It does not extend token lifetimes or guarantee uninterrupted cloud access.
+
+## Required iteration workflow
+
+For every implementation iteration, finish the code and relevant automated checks, then perform a software-architect code review of the complete final PR diff before reporting it ready for merge. Review account isolation and lifecycle races, local durability, original IDs/receipts, unknown outcomes, duplicate prevention, recovery/archive preservation, deletion suppression, error paths, performance and parity between web and iPhone. Passing CI does not replace this review.
+
+Reproduce suspected defects where practical. Fix verified issues within the authorized implementation scope, rerun affected checks, and review the final fix diff. Report unresolved findings by severity and state any unverified browser/physical-device acceptance. Save the iteration outcome and next step here. Do not merge, deploy, activate flags or spend paid Expo builds without the applicable user authorization.
+
+A standalone review request should report verified findings; it does not by itself authorize unrelated implementation changes. This workflow is also recorded in the repository root `AGENTS.md` so later iterations pick it up automatically.
 
 ## Current baseline and risks
 
@@ -256,3 +264,34 @@ Shared adapter and API tests cover cache-first opens, wrong-game responses, reta
 ### PR #72 architecture review corrections
 
 Device-only starts now persist their classification atomically with game creation in both apps and the account-unavailable fallback. Same-version account collisions retain both validated snapshots in lifecycle-guarded, account/game-scoped durable evidence; review survives cache opens and process restart and cannot be cleared by an ordinary GET. Storage/corruption failures remain visible. Added regression checks on both adapters and local creation failure/retry. Explicit evidence resolution/archive and collision gating for future queued writers/delivery remain prerequisites for activation. All flags remain disabled; no API/schema deployment or paid Expo build is required.
+
+
+### Phase 3 continuation, increment 9 — explicit saved-copy recovery
+
+PR #72 is merged. Added a separately disabled recovery review on both web and iPhone, requiring the existing cache and read-only screen pilots. The shared account-scoped reader shows current device/account evidence and retained recovery copies with totals and progressively revealed score history. Opening a review never writes, acknowledges or uploads anything. Cold-start restored leases may inspect copies but cannot choose a version until fresh account verification.
+
+A terminal rejected operation with a sufficiently recent account snapshot may be resolved only through a second explicit confirmation. The private preview ticket binds its original scope, verified lease, game, queue revision and one immutable decision ID. The guarded queue transaction archives the exact device projection/base/reservations, original requests, receipts and dependants before installing the reviewed account snapshot. Lifecycle changes, stale/forged previews and an intervening collision reject the choice. Retrying an ambiguous completed decision cannot apply/archive twice. Earlier device scores remain inspectable through Review saved copies; no recovery copy is automatically adopted, merged, erased or resubmitted.
+
+Unknown operation outcomes, same-version collisions, receipt/content mismatches without a terminal review and deleted account versions cannot be selected through this increment. Existing sources and evidence remain intact. Recovery navigation from hidden/deleted games, explicit collision-resolution/archive policy, durable erasure/retention/privacy acceptance and actual browser/physical-iPhone validation remain open. These are activation gates, not permission to clear records or bypass review.
+
+New flags: `NEXT_PUBLIC_GAME_RECOVERY_PILOT` and `EXPO_PUBLIC_GAME_RECOVERY_PILOT`, both false/absent by default and effective only with their existing cache/screen pilots. No production flags or EAS settings are changed. No API/schema deployment or paid Expo build is required to merge this client-only increment. New regression checks run against IndexedDB and desktop SQLite and are included in CI.
+
+Next: collision-aware queued writer/delivery gates and a captured-account manual delivery bridge through the existing connection controls, then queue-aware home/recovery summaries and the remaining adoption/privacy/retention/performance/device gates before controlled activation. Keep all backend/client pilots disabled.
+
+
+### PR #73 post-implementation architecture review
+
+Reviewed implementation head `653a1ee` after all four CI jobs passed. One P2 finding remains before merge: both `reviewSavedCopies` handlers update `accountRead` but only update `view` for a live game result. If the repository now returns `pending-delete` or `deleted`, the old live selection remains visible. Reproduced with real IndexedDB and desktop SQLite deletion states and the actual web/iPhone state-adoption handlers; this was not a physical-device or browser end-to-end test. No storage loss or write-policy bypass was observed, but the screen violates the existing deletion-suppression contract.
+
+Next correction: centralize or consistently apply non-live recovery-read adoption in both shells, clear/suppress the selected live game and stale home summary as appropriate, preserve access to review evidence, and add app-adoption regression coverage for pending/confirmed deletion (including missing reads). Review the final fix diff and rerun affected checks before marking PR #73 ready. Runtime implementation was not changed by this standalone review. Mandatory per-iteration review is now recorded above and in root `AGENTS.md`.
+
+
+### PR #73 deletion-adoption correction and final review
+
+Corrected the P2 finding in both application shells: opening recovery now replaces the selected view for every read result, clearing stale live tiles for pending deletion, confirmed deletion or missing data. Pending/confirmed deletion suppresses only the matching account home row, preserving device-only and unrelated rows. Missing cache data keeps the home row available for Reconnect because absence is not deletion proof. The recovery dialog remains inspectable when its selected game is suppressed and closes on another game/account selection; account-access guards still prevent stale presentation/adoption.
+
+An eligible rejected deletion can still choose the reviewed account snapshot after its live tiles have been suppressed. The normal guarded recovery transaction retains its original base, request and receipt; success restores exactly one matching account home row. No source or queue data is erased to hide a tile.
+
+Extended the shared recovery CI suite to run actual web/iPhone handler source against real IndexedDB and desktop SQLite read/recovery states, including pending/confirmed/missing/live adoption, evidence retention, local/unrelated home rows, late account/game switches, rejected-delete recovery with no selected live view, account-row restoration and archive preservation. These tests cover state adoption, not physical device/browser rendering.
+
+Post-implementation review: checked the complete PR and final correction diff for deletion suppression, retained review access, scope/lease/revision decision guards, original request/receipt preservation, retries and web/iPhone parity. No additional blocking issue found in the reviewed code. Existing production pilots remain disabled; browser/physical-iPhone acceptance and the documented delivery/home-overlay/privacy/retention gates stay open. No API/schema deployment or paid Expo build is required for this correction. Next remains collision-aware delivery gates and captured-account manual delivery.

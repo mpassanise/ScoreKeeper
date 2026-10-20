@@ -2,10 +2,11 @@ import type {AccountStatus,GameView} from '../api';
 import {AccountAccessError} from './account-access';
 import {LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-games';
 import type {AccountGameRead} from './game-read-model';
-import {readGameCollision,keepGameCollision} from './game-collisions';
+import {recoveryReview} from './game-recovery';
+import {readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
-import {clearGameReadCache,createGameOutbox} from './game-outbox';
+import {clearGameReadCache,createGameOutbox,OutboxError} from './game-outbox';
 import type {AtomicDocuments,DocumentRecord} from './documents';
 type Active={selector:string;profileId:string};
 type Pending={selector:string;expectedProfileId?:string};
@@ -76,6 +77,23 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    // A writer may have started tracking while the generic cache read was pending.
    const latest=await outbox.readGame(gameId);await current(proof);if(latest)return withReview(proof,gameId,latest);
    return withReview(proof,gameId,cached?{kind:'game',source:'cache',sync:'confirmed',view:cached.view,pendingOperations:0,serverVersion:cached.serverVersion}:{kind:'missing'});
+  },
+  async readRecovery(proof:DurableLease,gameId:string){
+   account(proof);await current(proof);const saved=await api.outbox(proof).readRecovery(gameId),collision=await readGameCollision(documents,proof.profileId,gameId);
+   const read=saved.read?await withReview(proof,gameId,saved.read):await api.readGame(proof,gameId);await current(proof);
+   // The ticket uses the review's revision. A concurrent queue update can only
+   // make confirmation fail its CAS, never apply a different unseen choice.
+   const review=recoveryReview(gameId,read,saved.state,saved.conflict,collision);
+   if(review.canChooseAccount&&!confirmed.has(proof)){review.canChooseAccount=false;review.message='Reconnect, then reopen this review to choose an account copy. All saved copies stay available here.'}
+   return {review,revision:saved.conflict?saved.revision:null};
+  },
+  async chooseAccountRecovery(proof:DurableLease,gameId:string,revision:number,resolutionId:string){
+   account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   const currentReview=await api.readRecovery(proof,gameId);
+   const completed=(await api.outbox(proof).read()).archive.some(batch=>batch.id===resolutionId&&batch.kind==='account-selected'&&batch.gameId===gameId);
+   if(!completed&&!currentReview.review.canChooseAccount)throw new OutboxError('NEEDS_REVIEW','This game cannot use an account copy yet. All saved copies have been kept.');
+   await api.outbox(proof).useAccountVersion(gameId,revision,resolutionId,[{key:gameCollisionKey(proof.profileId,gameId),revision:0}]);
+   await current(proof);return api.readGame(proof,gameId);
   },
   async observeGame(proof:DurableLease,view:GameView):Promise<AccountGameRead>{
    account(proof);const observed=snapshot(proof.profileId,view);await current(proof);
