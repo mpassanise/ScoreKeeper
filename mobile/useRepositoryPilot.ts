@@ -9,13 +9,14 @@ const recovery=process.env.EXPO_PUBLIC_GAME_SCREEN_PILOT==='true'&&process.env.E
 const resolution=recovery&&process.env.EXPO_PUBLIC_GAME_COLLISION_RESOLUTION_PILOT==='true';
 const delivery=recovery&&process.env.EXPO_PUBLIC_GAME_DELIVERY_PILOT==='true';
 const scoring=delivery&&process.env.EXPO_PUBLIC_GAME_SCORING_PILOT==='true';
+const adoption=scoring&&process.env.EXPO_PUBLIC_GAME_ADOPTION_REVIEW_PILOT==='true';
 const staging=process.env.EXPO_PUBLIC_LEGACY_STAGING_PILOT==='true';
 export function useRepositoryPilot(onInvalidated:()=>void){
  const ref=useRef<RepositoryPilot|null>(null),callback=useRef(onInvalidated);callback.current=onInvalidated;
  const [review,setReview]=useState({busy:false,message:''});
  useEffect(()=>{
   if(!enabled)return;
-  const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:recovery,scoringEnabled:scoring,collisionResolutionEnabled:resolution,deliveryEnabled:delivery,onInvalidated:()=>callback.current(),open:async()=>{
+  const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:recovery,scoringEnabled:scoring,adoptionEnabled:adoption,collisionResolutionEnabled:resolution,deliveryEnabled:delivery,onInvalidated:()=>callback.current(),open:async()=>{
    // Only load the native module inside the enabled pilot. Enabling requires a new binary.
    const SQLite=await import('expo-sqlite');return openSQLiteConfirmedGames(await SQLite.openDatabaseAsync('scorekeeper-repository-v1.db'));
   }});ref.current=pilot;

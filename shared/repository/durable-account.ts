@@ -1,3 +1,4 @@
+import {adoptionSource,adoptionKey,adoptionIndexKey,adoptionReservation,checkedAdoption,checkedAdoptionIndex,adoptionReview,type AdoptionDraft} from './adoption-source';
 import {supportsQueuedScoring,supportsQueuedCompletion,supportsQueuedCorrections,supportsQueuedRules,supportsQueuedDeletion} from './scoring-writer';
 import {canEditGame} from '../game-edit';
 import type {GameWriteOperation} from '../game-operation-contract';
@@ -88,6 +89,34 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    if(read.kind!=='game')return read;
    const permission=offlineWrites.has(proof)&&scoring.has(proof),ready=permission&&saved.eligible&&read.sync!=='needs-review';
    return {...read,canScore:ready,canChangeCompletion:offlineWrites.has(proof)&&completion.has(proof)&&saved.completionEligible&&read.sync!=='needs-review',canCorrectEntries:offlineWrites.has(proof)&&corrections.has(proof)&&saved.completionEligible&&read.sync!=='needs-review'&&read.view.game.entries.length>0,canEditRules:offlineWrites.has(proof)&&rules.has(proof)&&saved.eligible&&read.sync!=='needs-review'&&canEditGame(read.view.game),canDelete:offlineWrites.has(proof)&&deletion.has(proof)&&saved.eligible&&read.sync!=='needs-review',scoreProfileId:proof.profileId,scoreAccess:!permission?'connect':read.source!=='queue'?'untracked':ready?'ready':'paused'};
+  },
+  async previewAdoption(proof:DurableLease,raw:string,gameId:string,operationId:string){
+   account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   if((await api.readGame(proof,gameId)).kind!=='missing')throw new OutboxError('NEEDS_REVIEW','An account copy or deletion record already exists. Review it before preparing a device copy.');
+   const source=await adoptionSource(raw,gameId,operationId),key=adoptionKey(proof.profileId,gameId),indexKey=adoptionIndexKey(proof.profileId),record=await documents.read(key),indexRecord=await documents.read(indexKey);
+   const index=indexRecord?checkedAdoptionIndex(indexRecord.value,proof.profileId):{schemaVersion:1 as const,profileId:proof.profileId,copies:[]};
+   let draft:AdoptionDraft,revision:number;
+   if(record){draft=await checkedAdoption(record.value,proof.profileId,gameId);if(draft.sourceRaw!==source.sourceRaw)throw new OutboxError('NEEDS_REVIEW','This device game changed. Its earlier prepared copy is retained; choosing a newer source needs review.');if(index.copies.find(c=>c.gameId===gameId)?.bytes!==adoptionReservation(draft))throw new LocalRepositoryError('STORAGE_CORRUPT','Retained adoption index and copy disagree.');revision=record.revision}
+   else{
+    if(index.copies.some(c=>c.gameId===gameId))throw new LocalRepositoryError('STORAGE_CORRUPT','A retained adoption copy is missing. Originals have been kept.');
+    draft={schemaVersion:1,profileId:proof.profileId,gameId,status:'staged',...source};index.copies.push({gameId,bytes:adoptionReservation(draft)});
+    if(index.copies.length>50||index.copies.reduce((n,c)=>n+c.bytes,0)>8_000_000)throw new OutboxError('QUEUE_FULL','Retained device copies are full. Existing copies have been kept.');
+    if(!documents.writeMany)throw new LocalRepositoryError('STORAGE_UNAVAILABLE','Atomic source retention is unavailable.');await current(proof);
+    try{const saved=await documents.writeMany([{key,expectedRevision:0,value:draft},{key:indexKey,expectedRevision:indexRecord?.revision??0,value:index}],[{key:KEY,revision:proof.revision}]);revision=saved[0].revision}catch(error){await current(proof);throw error}
+   }
+   await current(proof);return {review:adoptionReview(draft),ticket:{key,revision,operationId:draft.operation.operationId,sourceRaw:draft.sourceRaw}};
+  },
+  async confirmAdoptionSource(proof:DurableLease,ticket:{key:string;revision:number;operationId:string;sourceRaw:string},raw:string,gameId:string){
+   account(proof);await current(proof);if(!confirmed.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   if(ticket.key!==adoptionKey(proof.profileId,gameId))throw new AccountAccessError('PROFILE_MISMATCH');
+   const record=await documents.read(ticket.key);if(!record)throw new LocalRepositoryError('STORAGE_CORRUPT','The retained copy is missing.');const draft=await checkedAdoption(record.value,proof.profileId,gameId);
+   if(draft.operation.operationId!==ticket.operationId||draft.sourceRaw!==ticket.sourceRaw)throw new LocalRepositoryError('STORAGE_CONFLICT','The reviewed copy changed. Reopen review.');
+   const indexRecord=await documents.read(adoptionIndexKey(proof.profileId)),index=checkedAdoptionIndex(indexRecord?.value,proof.profileId);if(index.copies.find(c=>c.gameId===gameId)?.bytes!==adoptionReservation(draft))throw new LocalRepositoryError('STORAGE_CORRUPT','Retained adoption index and copy disagree.');
+   if(draft.status==='reviewed'){await current(proof);return adoptionReview(draft)}
+   if(record.revision!==ticket.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','The reviewed copy changed. Reopen review.');
+   const latest=await adoptionSource(raw,gameId,draft.operation.operationId);if(latest.sourceRaw!==draft.sourceRaw)throw new OutboxError('NEEDS_REVIEW','The device game changed while reviewing. Its retained copy is kept; nothing was queued.');
+   if((await api.readGame(proof,gameId)).kind!=='missing')throw new OutboxError('NEEDS_REVIEW','An account copy or deletion record appeared. Nothing was queued.');
+   await current(proof);try{await documents.write(ticket.key,record.revision,{...draft,status:'reviewed'},[{key:KEY,revision:proof.revision},{key:adoptionIndexKey(proof.profileId),revision:indexRecord!.revision}])}catch(error){await current(proof);throw error}await current(proof);return adoptionReview({...draft,status:'reviewed'});
   },
   async prepareScoring(proof:DurableLease,input:GameView):Promise<AccountGameRead>{
    account(proof);const selected=JSON.parse(JSON.stringify(input)) as GameView;await current(proof);

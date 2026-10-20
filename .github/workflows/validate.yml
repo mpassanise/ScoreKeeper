@@ -64,6 +64,7 @@ jobs:
       - run: node scripts/test-game-home.mjs
       - run: node scripts/test-collision-resolution.mjs
       - run: node scripts/test-scoring-writer.mjs
+      - run: node scripts/test-adoption-source.mjs
       - run: node scripts/test-repository-pilot.mjs
       - run: node scripts/test-connection-status.mjs
       - run: node scripts/test-account-refresh.mjs
