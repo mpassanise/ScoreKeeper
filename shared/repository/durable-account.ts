@@ -11,7 +11,7 @@ import {recoveryReview} from './game-recovery';
 import {readCollisionFile,checkedCollisionFile,readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
-import {clearGameReadCache,createGameOutbox,OutboxError} from './game-outbox';
+import {clearGameReadCache,createGameOutbox,OutboxError,importedGameIds} from './game-outbox';
 import type {AtomicDocuments,DocumentRecord} from './documents';
 type Active={selector:string;profileId:string};
 type Pending={selector:string;expectedProfileId?:string};
@@ -28,7 +28,7 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
 }
 /** Durable account state shared by IndexedDB and SQLite; no tokens or email keys. */
 export function createDurableAccountRepository(repository:ConfirmedGames){
- const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
+ const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>(),imports=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
  function stopDeliveries(proof?:DurableLease|VerificationTicket){
   clearGameReadCache(documents,proof?{key:KEY,revision:proof.revision}:undefined);
   for(const [worker,lease]of deliveries){
@@ -44,13 +44,13 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
  }
  async function write(expected:number,state:Lifecycle){if(closed)throw new AccountAccessError('STALE_ACCOUNT');try{return await documents.write(KEY,expected,state)}catch(error){if(error instanceof LocalRepositoryError&&error.code==='STORAGE_CONFLICT')throw new AccountAccessError('STALE_ACCOUNT');throw error}}
  async function accept(proof:DurableLease|VerificationTicket,status:AccountStatus){
-  const scoringSupported=supportsQueuedScoring(status.gameOperations),completionSupported=supportsQueuedCompletion(status.gameOperations),correctionsSupported=supportsQueuedCorrections(status.gameOperations),rulesSupported=supportsQueuedRules(status.gameOperations),deletionSupported=supportsQueuedDeletion(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);completion.delete(proof);corrections.delete(proof);rules.delete(proof);deletion.delete(proof);}
+  const scoringSupported=supportsQueuedScoring(status.gameOperations),completionSupported=supportsQueuedCompletion(status.gameOperations),correctionsSupported=supportsQueuedCorrections(status.gameOperations),rulesSupported=supportsQueuedRules(status.gameOperations),deletionSupported=supportsQueuedDeletion(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);completion.delete(proof);corrections.delete(proof);rules.delete(proof);deletion.delete(proof);imports.delete(proof);}
   const {record,state}=await current(proof),profileId=status.profileId;
   if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');
   const expected=proof.kind==='account'?proof.profileId:state.pending?.expectedProfileId;
   if(expected&&expected!==profileId){await write(record!.revision,{...state,active:null,pending:null});throw new AccountAccessError('PROFILE_MISMATCH')}
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
-  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);return lease;
+  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);return lease;
  }
  async function withReview(proof:DurableLease,gameId:string,read:AccountGameRead):Promise<AccountGameRead>{
   const collision=await readGameCollision(documents,proof.profileId,gameId);await current(proof);
@@ -118,6 +118,34 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    if((await api.readGame(proof,gameId)).kind!=='missing')throw new OutboxError('NEEDS_REVIEW','An account copy or deletion record appeared. Nothing was queued.');
    await current(proof);try{await documents.write(ticket.key,record.revision,{...draft,status:'reviewed'},[{key:KEY,revision:proof.revision},{key:adoptionIndexKey(proof.profileId),revision:indexRecord!.revision}])}catch(error){await current(proof);throw error}await current(proof);return adoptionReview({...draft,status:'reviewed'});
   },
+  async deviceAuthority(proof:DurableLease,gameId:string){
+   account(proof);await current(proof);const state=await api.outbox(proof).read();await current(proof);return importedGameIds(state).includes(gameId);
+  },
+  async admitAdoption(proof:DurableLease,ticket:{key:string;revision:number;operationId:string;sourceRaw:string},raw:string,gameId:string):Promise<AccountGameRead>{
+   account(proof);await current(proof);
+   if(!confirmed.has(proof)||!offlineWrites.has(proof)||!imports.has(proof))throw new OutboxError('CAPABILITY_REQUIRED','Reconnect to a server with replay-safe game import support before adding this copy.');
+   if(ticket.key!==adoptionKey(proof.profileId,gameId))throw new AccountAccessError('PROFILE_MISMATCH');
+   const record=await documents.read(ticket.key);if(!record)throw new LocalRepositoryError('STORAGE_CORRUPT','The reviewed source is missing.');
+   const draft=await checkedAdoption(record.value,proof.profileId,gameId);
+   if(draft.status!=='reviewed'||draft.operation.operationId!==ticket.operationId||draft.sourceRaw!==ticket.sourceRaw)throw new OutboxError('NEEDS_REVIEW','Confirm the retained source before queueing it.');
+   const indexKey=adoptionIndexKey(proof.profileId),indexRecord=await documents.read(indexKey),index=checkedAdoptionIndex(indexRecord?.value,proof.profileId);
+   if(index.copies.find(c=>c.gameId===gameId)?.bytes!==adoptionReservation(draft))throw new LocalRepositoryError('STORAGE_CORRUPT','Retained adoption index and copy disagree.');
+   const outbox=api.outbox(proof);
+   // An acknowledged local admission must never be retargeted to a changed
+   // source or new operation, including after restart, rejection or deletion.
+   if(await outbox.hasOperation(draft.operation))return api.readScoringGame(proof,gameId);
+   const source=await adoptionSource(raw,gameId,draft.operation.operationId);
+   if(source.sourceRaw!==draft.sourceRaw)throw new OutboxError('NEEDS_REVIEW','The device source changed. Its reviewed copy is kept; nothing was queued.');
+   if((await api.readGame(proof,gameId)).kind!=='missing')throw new OutboxError('NEEDS_REVIEW','An account copy or deletion record already exists. Nothing was queued.');
+   try{await outbox.enqueue(draft.operation,false,[{key:ticket.key,revision:record.revision},{key:indexKey,revision:indexRecord!.revision}],'sync')}
+   catch(error){
+    await current(proof);
+    if(['STALE_ACCOUNT','PROFILE_MISMATCH','ACCOUNT_DELETING','OPERATION_ID_REUSED'].includes((error as {code?:string})?.code??''))throw error;
+    try{if(await outbox.hasOperation(draft.operation))return api.readScoringGame(proof,gameId)}catch(probe){await current(proof);if(['STALE_ACCOUNT','PROFILE_MISMATCH','ACCOUNT_DELETING','OPERATION_ID_REUSED'].includes((probe as {code?:string})?.code??''))throw probe;throw Object.assign(new Error('The local admission could not be confirmed. Retry this reviewed copy; its original request is retained.'),{code:'SAVE_UNCONFIRMED'})}
+    throw error;
+   }
+   await current(proof);return api.readScoringGame(proof,gameId);
+  },
   async prepareScoring(proof:DurableLease,input:GameView):Promise<AccountGameRead>{
    account(proof);const selected=JSON.parse(JSON.stringify(input)) as GameView;await current(proof);
    if(!confirmed.has(proof)||!offlineWrites.has(proof)||!scoring.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
@@ -148,13 +176,13 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   async readHome(proof:DurableLease,seeds:GameSummary[]){
    account(proof);await current(proof);
    const index=await retainHomeSummaries(documents,proof.profileId,seeds,{key:KEY,revision:proof.revision});
-   await current(proof);const saved=await api.outbox(proof).readHomeState(),rows=queueHome(saved.state,index);
+   await current(proof);const saved=await api.outbox(proof).readHomeState(),adoptedGameIds=importedGameIds(saved.state),rows=queueHome(saved.state,index,adoptedGameIds);
    // Bound concurrent document reads. Never reread/decode the queue per tile.
    for(let i=0;i<rows.length;i+=16)await Promise.all(rows.slice(i,i+16).map(async row=>{
     const saved=await readCollisionFile(documents,proof.profileId,row.gameId);if(saved.file?.active)row.sync='needs-review';if(saved.file?.history.length)row.retained=true;
    }));
    const tracked=new Map(saved.state.games.map(game=>[game.gameId,game]));for(const row of rows){const game=tracked.get(row.gameId);row.canDelete=offlineWrites.has(proof)&&deletion.has(proof)&&row.sync!=='needs-review'&&!!game?.projection&&!game.projection.game.finished&&!game.tombstone&&game.operations.every(op=>op.status==='queued')}
-   await current(proof);if((await documents.read('game-outbox:'+proof.profileId))?.revision!==saved.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Saved changes updated. Reconnect to refresh the list.');await current(proof);return {...homeResult(rows),profileId:proof.profileId};
+   await current(proof);if((await documents.read('game-outbox:'+proof.profileId))?.revision!==saved.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Saved changes updated. Reconnect to refresh the list.');await current(proof);return {...homeResult(rows),profileId:proof.profileId,adoptedGameIds};
   },
   async readRecovery(proof:DurableLease,gameId:string){
    account(proof);await current(proof);const saved=await api.outbox(proof).readRecovery(gameId),collision=await readCollisionFile(documents,proof.profileId,gameId);

@@ -12,7 +12,7 @@ export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
 /** Gated account repository pilot. Manual delivery is separately disabled;
  * score admission has its own flag; no automatic adoption/replay is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;adoptionEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;adoptionEnabled?:boolean;admissionEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
@@ -61,6 +61,15 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   confirmAdoptionSource(scope:ReadScope|null,review:AdoptionReview,raw:string){return serial(async()=>{
    if(!options.enabled||!options.adoptionEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const stored=adoptions.get(review);if(!stored||stored.selector!==scope.selector||stored.profileId!==lease.profileId)throw stale();const captured=lease,{access}=await repository();valid(scope);
    try{const value=await access.confirmAdoptionSource(captured,stored.ticket,raw,stored.gameId);valid(scope);return value}catch(error){invalidate(scope,error);throw error}
+  })},
+  deviceAuthority(scope:ReadScope|null,gameId:string){return serial(async()=>{
+   if(!options.enabled||!options.recoveryEnabled||!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);
+   try{if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}const result=await access.deviceAuthority(lease,gameId);valid(scope);return result}catch(error){invalidate(scope,error);throw error}
+  })},
+  admitAdoption(scope:ReadScope|null,review:AdoptionReview,raw:string){return serial(async()=>{
+   if(!options.enabled||!options.scoringEnabled||!options.adoptionEnabled||!options.admissionEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');
+   const stored=adoptions.get(review);if(!stored||stored.selector!==scope.selector||stored.profileId!==lease.profileId)throw stale();const captured=lease,{access}=await repository();valid(scope);
+   try{const read=await access.admitAdoption(captured,stored.ticket,raw,stored.gameId);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
   prepareScoring(scope:ReadScope|null,input:GameView,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameView;return serial(async()=>{
    if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;

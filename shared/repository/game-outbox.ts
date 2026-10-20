@@ -138,6 +138,12 @@ function scoringContent(view:GameView){
   roundLimit:g.roundLimit??null,targetScore:g.targetScore??null,presetId:g.presetId??null,presetVersion:g.presetVersion??null,finishReason:g.finishReason??null});
 }
 function contentMismatch(game:QueuedGame){const last=game.operations.at(-1);return !!(last&&game.operations.every(i=>i.status==='applied')&&game.candidate&&game.candidate.serverVersion===last.acknowledgement!.committedVersion&&(!game.projection||scoringContent(game.candidate.view)!==scoringContent(game.projection)))}
+/** Retained import bytes are also durable source authority. Receipts, conflict
+ * selection and deletion compaction keep them; no second mutable ownership flag. */
+// Only call with a validated outbox snapshot; do not revalidate every full import.
+export function importedGameIds(state:GameOutbox):string[]{
+ return [...new Set([...state.games.flatMap(g=>g.operations),...state.archive.flatMap(b=>b.operations)].flatMap(item=>{const op=JSON.parse(item.wire) as GameOperation;return op.kind==='import'?[op.gameId]:[]}))];
+}
 export function gameRead(game:QueuedGame):AccountGameRead{
  if(game.tombstone)return {kind:'deleted',serverVersion:game.tombstone.version};
  const review=game.operations.some(i=>i.status==='rejected')||contentMismatch(game);
@@ -264,9 +270,9 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    else{game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...review.account.view.game.entries.map(e=>e.id)])];game.base=review.account;game.projection=review.account.view}
    const guard=await collisionGuard(ctx.auth,gameId);await save(ctx,[guard,...guards]);
   },
-  async enqueue(input:GameOperation,scoringOnly=false){
+  async enqueue(input:GameOperation,scoringOnly=false,guards:readonly DocumentGuard[]=[],mode:'write'|'sync'='write'){
    // Freeze the exact request before any await; caller changes cannot alter retries.
-   const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read('write'),guard=await collisionGuard(ctx.auth,op.gameId);
+   const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read(mode),guard=await collisionGuard(ctx.auth,op.gameId);
    const duplicate=ctx.state.games.flatMap(g=>g.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
    if(duplicate){if(duplicate.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID already has a different immutable request.');return}
    if(ctx.state.archive.some(b=>b.kind==='account-selected'&&b.id===op.operationId))throw new OutboxError('OPERATION_ID_REUSED','This operation ID belongs to a retained review decision.');
@@ -287,7 +293,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    if(op.kind==='action'&&op.command.action==='score')game.reservedEntryIds.push(op.command.entryId);if(op.kind==='import')game.reservedEntryIds.push(...op.game.entries.map(e=>e.id));
    if(op.kind==='delete'&&game.projection)game.beforeDelete=JSON.parse(JSON.stringify(game.projection)) as GameView;
    const localTime=new Date().toISOString();game.projection=await project(op,game.projection,localTime);if(game.projection)snapshot(ctx.auth.profileId,game.projection);
-   game.operations.push({wire,status:'queued',localTime});await save(ctx,[guard]);
+   game.operations.push({wire,status:'queued',localTime});await save(ctx,[guard,...guards]);
   },
   async prepareDelivery(gameId:string,capability:unknown):Promise<string|null>{
    const ctx=await read('sync'),guard=await collisionGuard(ctx.auth,gameId),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)return null;if(contentMismatch(game))throw new OutboxError('NEEDS_REVIEW','Receipt and account content disagree. Delivery is paused.');

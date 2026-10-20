@@ -2,6 +2,7 @@ import type {GameView} from '../api';
 import type {AccountGameRead} from './game-read-model';
 import type {GameCollision,CollisionDecision} from './game-collisions';
 import type {ConflictReview,GameOutbox} from './game-outbox';
+import {gameView} from '../local-games';
 
 export type RecoveryCopy={id:string;label:string;view:GameView|null;version:number|null;deleted:boolean};
 export type GameRecoveryReview={gameId:string;read:AccountGameRead;copies:RecoveryCopy[];canChooseAccount:boolean;message:string;dependentCount:number;canCheckCollision?:boolean;canResolveCollision?:boolean};
@@ -19,6 +20,8 @@ export function recoveryReview(gameId:string,read:AccountGameRead,state:GameOutb
   add(batch.id,batch.recovery.projection?'Retained device copy':'Before device deletion',batch.recovery.beforeDelete??batch.recovery.projection??batch.recovery.base?.view??null,!batch.recovery.beforeDelete&&!batch.recovery.projection&&!batch.recovery.base);
  }
  for(const d of [...history].reverse()){add(d.id+'-retained','Archived account copy',d.pair.retained.view);add(d.id+'-observed','Archived conflicting copy',d.pair.observed.view);if(d.prior)add(d.id+'-prior','Before collision resolution',d.prior.view);add(d.id+'-selected','Chosen newer account copy',d.selected.view)}
+ const original=[...(game?.operations??[]),...state.archive.filter(b=>b.gameId===gameId).flatMap(b=>b.operations)].map(i=>JSON.parse(i.wire) as import('../game-operation-contract').GameOperation).find(op=>op.kind==='import');
+ if(original?.kind==='import')add('import-source','Original device copy (read-only)',gameView(original.game));
  const uncertain=!!game?.operations.some(op=>op.status==='uncertain');
  const canChooseAccount=!!conflict&&!collision&&!uncertain&&!('deleted'in conflict.account);
  const message=read.kind==='deleted'?'Deletion is confirmed in your account. Retained records stay on this device; opening this review does not restore or upload the game.':collision?'Two account copies disagree at the same version. Both are kept; choosing a version is paused.':uncertain?'A save has an unknown outcome. Reconnect before choosing a version so scores cannot be submitted twice.':conflict&&'deleted'in conflict.account?'This game was deleted in your account. Your device copy is kept for recovery.':canChooseAccount?'Compare your saved copies. Choosing the account copy keeps the current device scores in recovery; it does not combine or upload them.':read.kind==='game'&&read.sync==='needs-review'?'Saved copies still need review. Reconnect to refresh account information; your device scores stay here.':'These are saved copies, not a live connection. Reconnect to check for account updates.';
