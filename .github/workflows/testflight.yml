@@ -73,7 +73,7 @@ jobs:
       - name: Build iPhone app on EAS
         id: build
         run: |
-          eas build --platform ios --profile production --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
+          eas build --platform ios --profile production --clear-cache --non-interactive --wait --json > "$RUNNER_TEMP/eas-build.json"
           node - <<'NODE'
           const fs = require('node:fs');
           const path = require('node:path');

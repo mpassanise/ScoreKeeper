@@ -11,7 +11,18 @@
         "EXPO_PUBLIC_API_URL": "https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api",
         "EXPO_PUBLIC_AUTHORITY": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
         "EXPO_PUBLIC_CLIENT_ID": "7202edc2-fec5-4a71-b5f7-77fd49d42bb4",
-        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access"
+        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access",
+        "EXPO_PUBLIC_CONFIRMED_CACHE_PILOT": "true",
+        "EXPO_PUBLIC_GAME_SCREEN_PILOT": "true",
+        "EXPO_PUBLIC_GAME_RECOVERY_PILOT": "true",
+        "EXPO_PUBLIC_GAME_DELIVERY_PILOT": "true",
+        "EXPO_PUBLIC_GAME_SCORING_PILOT": "true",
+        "EXPO_PUBLIC_GAME_COLD_WRITES_PILOT": "true",
+        "EXPO_PUBLIC_GAME_AUTOMATIC_SYNC_PILOT": "true",
+        "EXPO_PUBLIC_GAME_ADOPTION_REVIEW_PILOT": "true",
+        "EXPO_PUBLIC_GAME_ADOPTION_IMPORT_PILOT": "true",
+        "EXPO_PUBLIC_LEGACY_STAGING_PILOT": "false",
+        "EXPO_PUBLIC_GAME_COLLISION_RESOLUTION_PILOT": "false"
       }
     },
     "preview": {
@@ -20,7 +31,18 @@
         "EXPO_PUBLIC_API_URL": "https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api",
         "EXPO_PUBLIC_AUTHORITY": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
         "EXPO_PUBLIC_CLIENT_ID": "7202edc2-fec5-4a71-b5f7-77fd49d42bb4",
-        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access"
+        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access",
+        "EXPO_PUBLIC_CONFIRMED_CACHE_PILOT": "true",
+        "EXPO_PUBLIC_GAME_SCREEN_PILOT": "true",
+        "EXPO_PUBLIC_GAME_RECOVERY_PILOT": "true",
+        "EXPO_PUBLIC_GAME_DELIVERY_PILOT": "true",
+        "EXPO_PUBLIC_GAME_SCORING_PILOT": "true",
+        "EXPO_PUBLIC_GAME_COLD_WRITES_PILOT": "true",
+        "EXPO_PUBLIC_GAME_AUTOMATIC_SYNC_PILOT": "true",
+        "EXPO_PUBLIC_GAME_ADOPTION_REVIEW_PILOT": "true",
+        "EXPO_PUBLIC_GAME_ADOPTION_IMPORT_PILOT": "true",
+        "EXPO_PUBLIC_LEGACY_STAGING_PILOT": "false",
+        "EXPO_PUBLIC_GAME_COLLISION_RESOLUTION_PILOT": "false"
       },
       "developmentClient": false,
       "ios": {
@@ -33,7 +55,18 @@
         "EXPO_PUBLIC_API_URL": "https://scorekeeper-api-dkdggvajgjgea7g6.westus3-01.azurewebsites.net/api",
         "EXPO_PUBLIC_AUTHORITY": "https://scorekeeperappcustomers.ciamlogin.com/e8d1bba5-f80e-44fa-a71c-824ff6312d31/v2.0",
         "EXPO_PUBLIC_CLIENT_ID": "7202edc2-fec5-4a71-b5f7-77fd49d42bb4",
-        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access"
+        "EXPO_PUBLIC_SCOPE": "api://c6f1573d-1e0c-4830-abed-a71b47d49cc8/Scorekeeper.Access",
+        "EXPO_PUBLIC_CONFIRMED_CACHE_PILOT": "true",
+        "EXPO_PUBLIC_GAME_SCREEN_PILOT": "true",
+        "EXPO_PUBLIC_GAME_RECOVERY_PILOT": "true",
+        "EXPO_PUBLIC_GAME_DELIVERY_PILOT": "true",
+        "EXPO_PUBLIC_GAME_SCORING_PILOT": "true",
+        "EXPO_PUBLIC_GAME_COLD_WRITES_PILOT": "true",
+        "EXPO_PUBLIC_GAME_AUTOMATIC_SYNC_PILOT": "true",
+        "EXPO_PUBLIC_GAME_ADOPTION_REVIEW_PILOT": "true",
+        "EXPO_PUBLIC_GAME_ADOPTION_IMPORT_PILOT": "true",
+        "EXPO_PUBLIC_LEGACY_STAGING_PILOT": "false",
+        "EXPO_PUBLIC_GAME_COLLISION_RESOLUTION_PILOT": "false"
       }
     }
   },
