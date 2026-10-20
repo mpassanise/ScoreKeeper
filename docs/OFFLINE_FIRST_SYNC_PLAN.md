@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-20
-Status: Local-first scoring, Finish/Resume, targeted undo/corrections and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
+Status: Local-first scoring, Finish/Resume, targeted undo/corrections, safe rule changes and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -14,7 +14,7 @@ This tracks delivered capabilities, not a percentage of effort or a fixed PR cou
 | Connection/auth UX | Implemented on web/iPhone | Real auth and first-launch acceptance |
 | Durable device repositories | Implemented on web/iPhone | Physical-device interruption/restart and privacy/erasure acceptance |
 | Replay-safe API/recovery | Implemented, migrations 004/005 previously applied | Two-device/old-client failure matrix and unresolved collision/deletion policies |
-| Local-first game actions | Basic scoring/selection, Finish/Resume, targeted undo/corrections and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
+| Local-first game actions | Basic scoring/selection, Finish/Resume, targeted undo/corrections, safe rule changes and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
 | Background sync and rollout | Manual delivery bridge implemented | Automatic bounded scheduler, cross-device acceptance, staged web/TestFlight rollout |
 | Performance/scale | Bounded queue/read-model safeguards implemented | Delta/pagination design, telemetry, sustained load/latency measurements |
 
@@ -417,3 +417,19 @@ Validation extends production IndexedDB/desktop SQLite tests for targeted edit/u
 Architect review covers the full final diff: account and verified capability isolation, explicit targeting, immutable requests/receipts/reservations, atomic durability, unknown outcomes, deletion/recovery retention, input/modal races, bounded local I/O and web/iPhone parity. No blocking code finding remains. Physical-iPhone/browser interaction, accessibility/dark mode, cold-launch draft recovery, real auth, two-device and sustained latency acceptance remain unverified. Keep all flags disabled; no API deployment, migration or paid Expo build is required to merge.
 
 Next: safe queued rule changes and queued deletion, followed by source adoption/import. Durable cold-start write permission, automatic background delivery, unresolved conflict/deletion policies, privacy/erasure/retention, staged rollout and measured performance/scale gates remain separate and open. Untracked completed cache copies still remain view-only.
+
+### Phase 3 continuation — increment 17: safe queued custom-game rules
+
+PR #80 is merged. Add local-first Edit game for prepared, in-progress custom account games on web/iPhone, under the existing disabled scoring pilot. Require a currently verified rules capability in addition to the scoring grant. Permit only the existing safe fields: name, high/low winner, manual/round/target ending, future round/score limits and immediate/end-of-round modifier. Existing applyGameEdit validation rejects preset/finished-game edits, incompatible free-play endings and limits behind recorded scores/rounds. Players, turn order, play style and score-entry mode stay fixed. Full snapshots, scores, entry IDs and totals remain intact.
+
+Capture one operation ID, exact rules and expected game version. Detach the rules object before asynchronous work so caller mutation cannot alter retry bytes. Use the existing atomic queue/projection save, lifecycle/collision guards and exact-request/receipt recovery. No network/auth work during admission and no legacy API mutation fallback. Cold restored leases and unresolved/uncertain/applied/rejected/collision/deletion states remain barriers.
+
+Both existing themed rule editors route account-pilot saves through the shared writer. Bind a save to the editor's displayed version; do not rebase a stale editor onto a newer game. Freeze editor fields while saving or while an original intent needs confirmation, show Retry save inside the editor and keep cancellation available once local work stops. A UI-only editor generation captured with the intent prevents delayed/retried saves from closing another editor session. Rule saves preserve the normal score draft. Late account/activity/game results remain ignored, and deletion closes stale editors while keeping input state. Read messages stop incorrectly describing settings as view-only when rules are enabled. Admission remains authoritative regardless of UI permission metadata.
+
+Validation extends production IndexedDB/desktop SQLite coverage for renamed/high-low/target/fixed-round changes, unchanged entries/totals/turn/play-style/mode, preset and invalid-limit rejection, exact duplicate admission, capability/cold/conflict barriers and original rules retry after both local acknowledgement and confirmation reads are lost. Mutating the caller's rules object after failure cannot change the retained request. Actual web/iPhone shell functions test rules routing without a legacy writer, stale editor-version denial, account/activity/game races and editor-session ownership on save/retry. Automated suites do not establish physical iPhone/browser layout, focus/accessibility/dark mode, real auth, cold drafts, two-device or sustained latency acceptance.
+
+Architect review of the complete final diff covers lifecycle and capability isolation, immutable payload/version capture, atomic durability, IDs/receipts, ambiguous outcomes, editor/cancel/reconnect races, recovery/deletion preservation, bounded local I/O and platform parity. No blocking code finding remains. All rollout flags stay disabled; no API deployment, migration or paid Expo build is needed for this gated merge.
+
+Next: queued in-progress game deletion, with explicit confirmation, durable suppression and receipt/recovery behavior. Deletion remains separate from rule changes. Then source adoption/import, durable cold-start write grants, automatic background delivery, unresolved conflict/deletion policies, privacy/retention/erasure, staged rollout and measured performance/scale acceptance remain open. Untracked completed copies remain view-only.
+
+Final review correction: native rule routing binds the rendered session rather than consulting a later mutable session ref to choose a legacy/local writer. A sign-out between render and submit cannot redirect an account edit to device storage; the repository path still checks current identity/profile. Shell routing tests run with the live ref cleared.
