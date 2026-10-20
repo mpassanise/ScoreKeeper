@@ -39,6 +39,16 @@ All rows need recorded results and resolved blocking defects/policies before act
 
 A dedicated `browser-sync` CI job runs `node scripts/test-browser-sync.mjs` with pinned Playwright/Chromium, actual IndexedDB transactions and the production durable-account/HTTP delivery code. The localhost HTTP fixture serializes commit/receipt outcomes and intentionally loses a committed response. It uses synthetic account/game data; it is not the deployed C# API, SQL, Entra or complete application UI.
 
-Execution is pending on this iteration's exact CI head. The local browser download failed, so no local Chromium pass is claimed. The suite covers two same-origin tabs delivering one immutable operation, two isolated browser stores conflicting at the same game version, explicit repeatable account-copy recovery with both histories retained, cold repository reopen and local save while browser networking is offline, reconnect delivery with original entry IDs, cross-tab sign-out, and deletion/tombstone/recovery retention across page reload. The test never clears storage as a recovery step. Browser contexts are disposable test stores only.
+Passed in GitHub Actions run [39496345284](https://github.com/mpassanise/ScoreKeeper/actions/runs/39496345284), browser-sync job 118882272929, on source head `ebe9b785f1dd3667166999de7b0df8eb1118cfc1` (2026-10-20). Environment: Ubuntu 24.04, Node 22, Playwright 1.58.2 and Chromium 145.0.7632.6. The local browser download failed, so no local Chromium pass is claimed. The suite covers two same-origin tabs delivering one immutable operation, two isolated browser stores conflicting at the same game version, explicit repeatable account-copy recovery with both histories retained, cold repository reopen and local save while browser networking is offline, reconnect delivery with original entry IDs, cross-tab sign-out, and deletion/tombstone/recovery retention across page reload. The test never clears storage as a recovery step. Browser contexts are disposable test stores only.
 
 This is supporting automated evidence for portions of the matrix, not completion of any full-app/device row. Every physical-device/production-auth/manual row above remains pending. Next collect a new iPhone binary and isolated browser/device run results, including effective flags and actual API capabilities, before authorizing rollout.
+
+
+| Controlled browser assertion | Recorded result |
+|---|---|
+| Both tab workers submit the same retained operation before the first commit; reply lost | Passed: exact-byte replay, one effect and original entry ID |
+| Isolated store submits stale game version | Passed: delivery pauses for review; repeatable explicit account choice preserves both histories |
+| Cold repository reopen and score save with browser network disabled | Passed: zero HTTP for local save; reconnect delivers the original entry once |
+| Cross-tab sign-out and confirmed deletion/page reload | Passed: stale write denied, tombstone retained and before-delete history preserved |
+
+No production-client or native linking result is inferred from these controlled assertions. Full CI on the final PR head is recorded in PR #88; documentation-only evidence updates do not change the tested browser source.
