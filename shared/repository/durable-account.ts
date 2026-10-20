@@ -88,6 +88,12 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    const permission=offlineWrites.has(proof)&&scoring.has(proof),ready=permission&&saved.eligible&&read.sync!=='needs-review';
    return {...read,canScore:ready,scoreProfileId:proof.profileId,scoreAccess:!permission?'connect':read.source!=='queue'?'untracked':ready?'ready':'paused'};
   },
+  async prepareScoring(proof:DurableLease,input:GameView):Promise<AccountGameRead>{
+   account(proof);const selected=JSON.parse(JSON.stringify(input)) as GameView;await current(proof);
+   if(!confirmed.has(proof)||!offlineWrites.has(proof)||!scoring.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
+   await api.outbox(proof).seedConfirmed(selected.game.id,selected);
+   await current(proof);return api.readScoringGame(proof,selected.game.id);
+  },
   async enqueueScoring(proof:DurableLease,input:GameActionOperation):Promise<AccountGameRead>{
    account(proof);const operation=JSON.parse(JSON.stringify(input)) as GameActionOperation;await current(proof);
    if(!offlineWrites.has(proof)||!scoring.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');

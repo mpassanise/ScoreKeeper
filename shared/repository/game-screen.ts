@@ -27,7 +27,7 @@ export async function openGameScreen(pilot:RepositoryPilot,scope:ReadScope|null,
 export function gameScreenMessage(read:AccountGameRead|null):{title:string;detail:string}{
  if(read?.kind==='game'&&read.canScore)return {title:read.sync==='pending'?'Scores saved on this device':'Ready to keep score',detail:'Scores save here first. Use Sync now to send them to your account. Game settings and history are view only.'};
  if(read?.kind==='game'&&read.scoreAccess==='connect')return {title:'Saved copy · view only',detail:'Reconnect to verify account scoring support before entering scores. Your saved games and device games remain available.'};
- if(read?.kind==='game'&&read.scoreAccess==='untracked')return {title:'Saved copy · view only',detail:'This game has not been prepared for offline score entry. Its saved copy is kept here.'};
+ if(read?.kind==='game'&&read.scoreAccess==='untracked')return {title:'Saved copy · view only',detail:'Enable score entry to use this saved copy. Scores will save on this device first; Sync now sends them to your account.'};
  if(read?.kind==='game'&&read.scoreAccess==='paused'&&read.sync==='pending')return {title:'Save confirmation pending',detail:'Reconnect to check the last save before entering more scores. Existing changes stay on this device.'};
  if(read?.kind==='deleted')return {title:'Game deleted',detail:'The confirmed deletion is saved on this device.'};
  if(read?.kind==='pending-delete')return {title:read.sync==='needs-review'?'Deletion needs review':'Deletion pending',detail:'This game stays hidden while its account deletion is unresolved. Your saved changes have been kept.'};

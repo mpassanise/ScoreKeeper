@@ -1,9 +1,24 @@
 # Offline-first scoring and resilient account sync
 
-Updated: 2026-10-19
-Status: Phase 3 increment 10 adds separately disabled, captured-account manual queue delivery on web/iPhone. Production flags and live queue writers remain disabled.
+Updated: 2026-10-20
+Status: Local-first scoring and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
+
+## Progress dashboard
+
+This tracks delivered capabilities, not a percentage of effort or a fixed PR count. Implemented pilots are not production acceptance.
+
+| Workstream | Current position | Remaining gate |
+|---|---|---|
+| Connection/auth UX | Implemented on web/iPhone | Real auth and first-launch acceptance |
+| Durable device repositories | Implemented on web/iPhone | Physical-device interruption/restart and privacy/erasure acceptance |
+| Replay-safe API/recovery | Implemented, migrations 004/005 previously applied | Two-device/old-client failure matrix and unresolved collision/deletion policies |
+| Local-first game actions | Basic scoring/selection and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
+| Background sync and rollout | Manual delivery bridge implemented | Automatic bounded scheduler, cross-device acceptance, staged web/TestFlight rollout |
+| Performance/scale | Bounded queue/read-model safeguards implemented | Delta/pagination design, telemetry, sustained load/latency measurements |
+
+Foundations are largely implemented. Completing action coverage, validation and staged activation remains substantial work. All rollout flags stay disabled until the acceptance gates pass.
 
 ## Outcome
 
@@ -366,3 +381,13 @@ New CI coverage executes production IndexedDB/desktop SQLite paths for local sco
 Post-implementation architecture review covers the complete final diff and final corrections: original requests/receipts/entry identity, authoritative local admission, ambiguous local outcomes, captured-profile retry across reconnect, lifecycle error propagation, deletion suppression, metadata/capability authority, reserved receipt capacity, minimal home summaries, no implicit cache adoption, no network write fallback and web/iPhone parity. No blocking finding remains in reviewed code. Browser/physical-iPhone layout/focus/accessibility/dark mode, real auth and cold-launch draft behavior, sustained large-history/memory latency and privacy/retention/erasure acceptance remain open. No claim of a complete cold-offline account writer or production readiness is made.
 
 Next: explicit preparation of cached account games for queue-backed scoring, then remaining targeted queued actions and source adoption/import. Durable cold-start write grants, unresolved collision/deletion policy, privacy/retention and device/browser/performance acceptance remain separate gates before production activation. Keep all rollout flags disabled.
+
+### Phase 3 continuation — increment 14: explicit cached-game preparation
+
+Add an explicit Enable score entry action on web/iPhone under the existing effective scoring pilot. Bind preparation to the rendered full snapshot, stable verified profile and current scope. Require current-process account/capability verification; cold restored leases cannot prepare. Refuse missing, changed, finished or colliding cache copies. Atomically add the existing confirmed snapshot to the bounded queue using its existing lifecycle/collision/CAS guards; reserve historical entry IDs. No score operation, upload, identity replacement, guest import or implicit preparation occurs. Repeated preparation preserves an existing matching-base queue, including pending scores/deletion; return its current read so deletion stays suppressed. Older snapshots can still conflict with remote edits at delivery; expected-version checks remain mandatory and no merge/rebase is inferred.
+
+Validation extends both IndexedDB and desktop SQLite scoring suites with preparation, repeat/no-op, changed/missing/finished copies, cold-lease denial, collision/deletion/pending preservation and profile binding. Real browser and physical-iPhone interaction, storage-failure and two-device acceptance remain required before activation. No backend schema, deployment or paid build is required to merge this gated increment.
+
+Next: remaining targeted queued actions, then source adoption/import. Durable cold-start write permission, automatic background delivery, unresolved collision/deletion policy, privacy/retention and browser/device/performance acceptance remain distinct gates. Keep production flags disabled.
+
+Architect review (increment 14): reviewed the complete final diff for lifecycle/profile isolation, immutable snapshot binding, CAS/collision guards, pending operations/receipt preservation, unknown local acknowledgement retry, deletion suppression, and equivalent web/iPhone handlers. No blocking code finding remains. Preparation performs only local I/O; server freshness is checked by existing expected-version delivery rather than assumed from a cached view. UI hides preparation on known review states. Automated coverage includes actual shell-handler account/activity/selection races. Local mobile typecheck is blocked by an existing dangling AsyncStorage dependency symlink; clean GitHub mobile CI is required. Physical-iPhone/browser acceptance remains open.
