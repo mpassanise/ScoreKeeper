@@ -20,17 +20,19 @@ try{
  const players=[{id:randomUUID(),name:'First'},{id:randomUUID(),name:'Second'}];
  const initial=gameView({id:randomUUID(),name:'Browser fixture',players,winner:'high',entries:[],next:players[0].id,finished:false,version:1,updated:'2026-10-20T00:00:00Z'});
  let remote=initial,tail=Promise.resolve(),requests=0,effects=0,dropReply=true,deleted=false;
- const receipts=new Map(),wires=[];
+ const receipts=new Map(),wires=[],senders=new Set();let releaseFirst;const bothTabs=new Promise(resolve=>releaseFirst=resolve);
  const json=(res,value,code=200)=>{res.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value))};
  server=createServer((req,res)=>{void(async()=>{
   if(req.url==='/'){res.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-store'});res.end('<!doctype html><title>Scorekeeper repository fixture</title><script src="/fixture.js"></script>');return}
   if(req.url==='/fixture.js'){res.writeHead(200,{'Content-Type':'text/javascript'});res.end(bundle);return}
-  requests++;if(req.headers.authorization!=='Bearer fixture-A'){json(res,{error:'Fixture identity denied'},401);return}
+  if(!['/account','/game-operations',`/games/${initial.game.id}`].includes(req.url)){json(res,{error:'No fixture route'},404);return}
+  requests++;if(!/^Bearer fixture-A:tab[0-9]+$/.test(req.headers.authorization??'')){json(res,{error:'Fixture identity denied'},401);return}
   if(req.url==='/account'){json(res,status);return}
   if(req.url===`/games/${initial.game.id}`){json(res,deleted?{error:'Deleted'}:remote,deleted?404:200);return}
   if(req.url!=='/game-operations'||req.method!=='POST'){json(res,{error:'No fixture route'},404);return}
   let wire='';for await(const chunk of req){wire+=chunk;if(wire.length>2000000)throw Error('Oversized test request')}
   wires.push(wire);const op=JSON.parse(wire);
+  if(receipts.size===0){senders.add(req.headers.authorization);if(senders.size>=2)releaseFirst();await bothTabs}
   // Serialize commit+receipt only; dropping a response cannot hold the commit lock.
   const commit=tail.then(async()=>{
    const retained=receipts.get(op.operationId);if(retained){assert.equal(retained.wire,wire);return retained.ack}
@@ -47,8 +49,8 @@ try{
  })().catch(error=>{console.error(error);json(res,{error:'Fixture failure'},500)})});
  await new Promise(resolve=>server.listen(0,'localhost',resolve));const origin=`http://localhost:${server.address().port}`;
  browser=await chromium.launch({headless:true});
- const failures=[],contexts=[];
- async function page(context){const page=await context.newPage();page.setDefaultTimeout(15000);page.on('pageerror',e=>failures.push(e.message));await page.goto(origin);await page.evaluate(()=>{
+ const failures=[],contexts=[];let tab=0;
+ async function page(context){const page=await context.newPage();page.setDefaultTimeout(15000);page.on('pageerror',e=>failures.push(e.message));await page.goto(origin);await page.evaluate(tag=>{
   const {openConfirmedGames}=fixtureLoad('repository/indexeddb-confirmed-games'),{createDurableAccountRepository}=fixtureLoad('repository/durable-account');
   let repository,access,lease,worker;
   globalThis.client={
@@ -59,11 +61,11 @@ try{
    async queue(){return access.outbox(lease).read()},
    async recovery(id){return access.readRecovery(lease,id)},
    async choose(id,revision,decision){return access.chooseAccountRecovery(lease,id,revision,decision)},
-   async deliver(){worker=access.httpDelivery(lease,location.origin,async()=> 'fixture-A',{enabled:true,retryDelayMs:0,stepTimeoutMs:3000,passTimeoutMs:15000});try{return await worker.connect()}finally{worker.close()}},
+   async deliver(){worker=access.httpDelivery(lease,location.origin,async()=> 'fixture-A:'+tag,{enabled:true,retryDelayMs:0,stepTimeoutMs:3000,passTimeoutMs:15000});try{return await worker.connect()}finally{worker.close()}},
    async signOut(){await access.signOut(lease)},
    async close(){await access.close()}
   };
- });return page}
+ },'tab'+(++tab));return page}
  const call=(p,name,...args)=>p.evaluate(({name,args})=>client[name](...args),{name,args});
  const score=(view,points)=>({protocolVersion:1,kind:'action',operationId:randomUUID(),gameId:view.game.id,command:{action:'score',expectedVersion:view.game.version,points,playerId:view.game.next,entryId:randomUUID()}});
  const a=await browser.newContext(),b=await browser.newContext();contexts.push(a,b);const a1=await page(a),a2=await page(a),b1=await page(b);
@@ -72,7 +74,7 @@ try{
  // Separate pages share actual browser IndexedDB; both workers may replay a head.
  await Promise.all([call(a1,'deliver'),call(a2,'deliver')]);
  for(let i=0;i<3&&(await call(a1,'read',initial.game.id)).pendingOperations;i++)await call(a1,'deliver');
- assert.equal(effects,1);assert.equal(remote.game.entries.length,1);assert.equal(remote.game.entries[0].id,first.command.entryId);const replays=wires.filter(w=>JSON.parse(w).operationId===first.operationId);assert.ok(replays.length>=2,'lost reply/concurrent workers replay original request');assert.ok(replays.every(w=>w===replays[0]),'every replay uses identical retained bytes');assert.equal((await call(a1,'read',initial.game.id)).sync,'confirmed');
+ assert.equal(senders.size,2,'both tab workers must send before the first commit');assert.equal(effects,1);assert.equal(remote.game.entries.length,1);assert.equal(remote.game.entries[0].id,first.command.entryId);const replays=wires.filter(w=>JSON.parse(w).operationId===first.operationId);assert.ok(replays.length>=2,'lost reply/concurrent workers replay original request');assert.ok(replays.every(w=>w===replays[0]),'every replay uses identical retained bytes');assert.equal((await call(a1,'read',initial.game.id)).sync,'confirmed');
  console.log('Chromium same-origin tabs: shared real IndexedDB and concurrent HTTP replay produce one effect after a lost reply');
  // Device B still has version 1; keep both histories when its offline intent conflicts.
  const stale=score(initial,11);await call(b1,'enqueue',stale);assert.equal((await call(b1,'deliver')).phase,'needs-review');assert.equal(effects,1);
