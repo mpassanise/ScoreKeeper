@@ -90,3 +90,19 @@ jobs:
       - run: node scripts/test-swipe-game-row.mjs
       - run: npx expo export --platform ios --output-dir /tmp/scorekeeper-mobile
         working-directory: mobile
+
+  browser-sync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - run: pnpm install --frozen-lockfile
+      - run: npm ci --prefix tests/browser --ignore-scripts --no-audit --no-fund
+      - run: node tests/browser/node_modules/playwright/cli.js install --with-deps chromium
+      - run: node scripts/test-browser-sync.mjs

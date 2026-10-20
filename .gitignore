@@ -58,3 +58,6 @@ mobile/.env
 !mobile/.env.example
 
 *.tsbuildinfo
+
+# Isolated browser integration dependencies
+tests/browser/node_modules/
