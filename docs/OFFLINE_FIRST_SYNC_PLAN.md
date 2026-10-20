@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-20
-Status: Local-first scoring, Finish/Resume and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
+Status: Local-first scoring, Finish/Resume, targeted undo/corrections and explicit cached-game preparation implemented behind disabled pilot flags on web/iPhone. Integration, acceptance and rollout remain incomplete.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -14,7 +14,7 @@ This tracks delivered capabilities, not a percentage of effort or a fixed PR cou
 | Connection/auth UX | Implemented on web/iPhone | Real auth and first-launch acceptance |
 | Durable device repositories | Implemented on web/iPhone | Physical-device interruption/restart and privacy/erasure acceptance |
 | Replay-safe API/recovery | Implemented, migrations 004/005 previously applied | Two-device/old-client failure matrix and unresolved collision/deletion policies |
-| Local-first game actions | Basic scoring/selection, Finish/Resume and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
+| Local-first game actions | Basic scoring/selection, Finish/Resume, targeted undo/corrections and explicit cache preparation implemented | Remaining targeted actions, local creation/adoption/import, durable cold-start write grants |
 | Background sync and rollout | Manual delivery bridge implemented | Automatic bounded scheduler, cross-device acceptance, staged web/TestFlight rollout |
 | Performance/scale | Bounded queue/read-model safeguards implemented | Delta/pagination design, telemetry, sustained load/latency measurements |
 
@@ -403,3 +403,17 @@ New coverage runs production IndexedDB/desktop SQLite paths for finish/resume tr
 Architect review of the complete final diff covers lifecycle/capability isolation, authoritative queue admission, expected versions, original IDs/receipt retention, unknown outcomes, archive/deletion preservation, local I/O performance and platform parity. Avoid duplicate scoring-content validation while deriving score/completion eligibility. Pause completion permission alongside scoring when adopting an error-state read; distinguish intentionally finished games from connectivity failure. No blocking code finding remains. Browser/physical-iPhone layout/focus/accessibility/dark mode, real auth, two-device and interruption acceptance remain unverified.
 
 Scope remains prepared/tracked account games. Previously untracked finished account copies remain view-only; this increment does not broaden cache preparation or add adoption/import. Undo, targeted entry edits, safe rule edits and queued deletion remain subsequent action increments. Then source adoption/import, durable cold-start write permission, automatic background delivery, unresolved conflict/deletion policies, privacy/erasure, staged rollout and sustained performance acceptance remain open. All production flags stay disabled. No migration, API deployment or paid Expo build is required to merge this gated increment.
+
+### Phase 3 continuation — increment 16: targeted queued undo and entry corrections
+
+PR #79 is merged. Extend the existing disabled scoring pilot on web/iPhone with Undo last score and correction of an existing history entry, including tracked completed games. Require current-process capability advertising both undo/edit as well as the existing scoring grant. Capture target entry ID, expected game version and operation ID once; corrections allocate no replacement entry IDs. Undo targets the captured final entry, never whichever entry happens to be last during retry. Entry corrections keep the same entry identity. Existing additive/total scoring, score limits, turn restoration and automatic/manual ending behavior still govern projections. Keep missing targets, wrong undo targets and stale versions from changing the queue.
+
+Use the existing atomic projection/outbox transaction, lifecycle/collision guards, reserved entry identities and exact-request reconciliation. Uncertain/applied-but-unreconciled/rejected/collision/deletion states pause new corrections; cold restored leases remain read-only. Unknown local outcomes retain the original edit/undo intent and explicit Retry save. A newer queued score added by another writer survives retry of an already saved Undo. No legacy API mutation fallback, implicit adoption or operation rebase is added.
+
+Expose existing themed undo/history controls on both platforms without exposing unsupported reorder/rule writes. The edit dialog contains its own Retry save and explains that retries use the original change. Only a locally confirmed edit matching the current editor target and edited input closes that editor; changed draft input or a different target stays open. Corrections never clear the normal score draft. Non-live/deleted reads suppress selected/home games and close a stale editor while keeping input state. Late account/activity/game results remain ignored. Pause correction permission alongside score/completion permission when adopting an error-state read.
+
+Validation extends production IndexedDB/desktop SQLite tests for targeted edit/undo, unchanged entry identity/turn order, additive totals and total-mode behavior, wrong/missing targets, exact duplicate undo, completed/manual and automatic-ending corrections, capability/cold/conflict barriers, and exact-wire edit/undo retry across reconnect after local commit acknowledgement and confirmation reads are lost. The Undo retry test adds a later score with an independent writer before retry and proves it is not removed. Actual shell save handlers exercise score/finish/resume/undo/edit and account/activity/game/input/editor-target races; matching editor closure and normal-draft preservation are asserted. Existing outbox/read-model/pilot/recovery/manual/home and clean web/iPhone CI remain required.
+
+Architect review covers the full final diff: account and verified capability isolation, explicit targeting, immutable requests/receipts/reservations, atomic durability, unknown outcomes, deletion/recovery retention, input/modal races, bounded local I/O and web/iPhone parity. No blocking code finding remains. Physical-iPhone/browser interaction, accessibility/dark mode, cold-launch draft recovery, real auth, two-device and sustained latency acceptance remain unverified. Keep all flags disabled; no API deployment, migration or paid Expo build is required to merge.
+
+Next: safe queued rule changes and queued deletion, followed by source adoption/import. Durable cold-start write permission, automatic background delivery, unresolved conflict/deletion policies, privacy/erasure/retention, staged rollout and measured performance/scale gates remain separate and open. Untracked completed cache copies still remain view-only.
