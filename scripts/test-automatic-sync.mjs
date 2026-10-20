@@ -32,6 +32,16 @@ try{
   const time=clock(),hold=deferred(),signals=[];const auto=createAutomaticSync({enabled:true,clock:time,run:async signal=>{signals.push(signal);if(signals.length===1)await hold.promise;return 'done'}});auto.setActive(true);await time.advance(1000);auto.setActive(false);assert.equal(signals[0].aborted,true);auto.request();await time.advance(100000);assert.equal(signals.length,1);auto.setActive(true);hold.resolve();await turn();await time.advance(1000);assert.equal(signals.length,2);auto.close();await time.advance(100000);assert.equal(signals.length,2);
   const disabled=createAutomaticSync({enabled:false,clock:time,run:async()=>{throw Error('disabled')}});disabled.setActive(true);disabled.wake();disabled.request();assert.equal(time.size(),0);disabled.close();
  }
+ // Recovery before the exhaustion cooldown expires schedules exactly one wake.
+ {
+  const time=clock();let calls=0;const auto=createAutomaticSync({enabled:true,clock:time,retryMs:[],run:async()=>{calls++;return calls===1?'retry':'done'}});
+  auto.setActive(true);await time.advance(1000);assert.equal(calls,1);auto.setActive(false);auto.setActive(true);
+  for(let i=0;i<20;i++)auto.wake();assert.equal(time.size(),1);await time.advance(59749);assert.equal(calls,1);await time.advance(1);assert.equal(calls,2);assert.equal(time.size(),0,'wake is not periodic');auto.close();
+ }
+ {
+  const time=clock();let calls=0;const auto=createAutomaticSync({enabled:true,clock:time,retryMs:[],run:async()=>{calls++;return 'retry'}});
+  auto.setActive(true);await time.advance(1000);auto.wake();auto.setActive(false);await time.advance(100000);assert.equal(calls,1,'background cancels delayed recovery');auto.close();assert.equal(time.size(),0);
+ }
  assert.equal(automaticResult(false,{status:'sign-in',lastConnectedAt:null}),'blocked');assert.equal(automaticResult(false,{status:'unavailable',lastConnectedAt:null,diagnostic:{code:'CAPABILITY_REQUIRED'}}),'blocked');assert.equal(automaticResult(true,{status:'connected',lastConnectedAt:1,delivery:{phase:'pending'}}),'retry');assert.equal(automaticResult(true,{status:'connected',lastConnectedAt:1,delivery:{phase:'needs-review'}}),'done');
  // Run both actual platform hooks with effect/ref and surface fakes. A render
  // for a new account cannot redirect an old timer to its new callback.
