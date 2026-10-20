@@ -61,6 +61,7 @@ jobs:
       - run: node scripts/test-game-delivery.mjs
       - run: node scripts/test-manual-delivery.mjs
       - run: node scripts/test-automatic-sync.mjs
+      - run: node scripts/test-native-connectivity.mjs
       - run: node scripts/test-game-read-model.mjs
       - run: node scripts/test-game-recovery.mjs
       - run: node scripts/test-game-home.mjs

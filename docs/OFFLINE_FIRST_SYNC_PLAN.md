@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-20
-Status: Existing-game actions, explicit cache preparation, reviewed imports, account-copy navigation and durable cold-start editing are implemented behind disabled web/iPhone pilots. Bounded automatic foreground delivery is implemented behind another disabled flag; native connectivity events, acceptance and rollout remain incomplete.
+Status: Existing-game actions, explicit cache preparation, reviewed imports, account-copy navigation and durable cold-start editing are implemented behind disabled web/iPhone pilots. Bounded automatic foreground delivery is implemented behind another disabled flag; native connectivity signaling is implemented, while device acceptance and rollout remain incomplete.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -15,10 +15,10 @@ This tracks delivered capabilities, not a percentage of effort or a fixed PR cou
 | Durable device repositories | Implemented on web/iPhone | Physical-device interruption/restart and privacy/erasure acceptance |
 | Replay-safe API/recovery | Implemented, migrations 004/005 previously applied | Two-device/old-client failure matrix and unresolved collision/deletion policies |
 | Local-first game actions | Existing-game actions, reviewed-source imports, account-copy navigation and durable cold editing implemented | Integration, cold-device and mixed-client acceptance |
-| Background sync and rollout | Manual bridge and bounded automatic foreground scheduler implemented on web/iPhone | Native connectivity events, device/mixed-client acceptance, staged web/TestFlight rollout |
+| Background sync and rollout | Manual bridge, bounded automatic foreground scheduler and connectivity signals implemented on web/iPhone | Device/mixed-client acceptance, staged web/TestFlight rollout |
 | Performance/scale | Bounded queue/read-model safeguards implemented | Delta/pagination design, telemetry, sustained load/latency measurements |
 
-Foundations and existing-game action coverage are implemented. Connectivity hardening, validation and staged activation remain substantial work. All rollout flags stay disabled until the acceptance gates pass.
+Foundations, existing-game action coverage and foreground connectivity signaling are implemented. Device validation and staged activation remain substantial work. All rollout flags stay disabled until the acceptance gates pass.
 
 ## Outcome
 
@@ -524,3 +524,18 @@ Validation: deterministic scheduler/hook tests cover disabled/idle behavior, bur
 Software-architect review covers the complete final diff: lifecycle/profile isolation, original request/entry IDs, in-flight dependent writes, receipt/CAS races, unknown outcomes, duplicate prevention, rejection/deletion/archive preservation, local scopes, cross-tab verification, draft ownership, bounded scheduling, cancellation, error paths and platform parity. Review corrected epoch churn on unchanged background verification, lost scheduling hints behind older manual passes, account-key callback rebinding and draft/deletion handling. No blocking code finding remains for this disabled pilot. Physical browser/iPhone acceptance, native network restoration, mixed/two-device interruption and sustained performance remain open.
 
 All production flags remain disabled. No deployment, SQL/SQLite/IndexedDB migration, new native dependency, OS task or paid Expo build is performed/needed to merge. Next: native connectivity signaling and the browser/physical-device/two-client acceptance matrix, retention/privacy/erasure and rollout preflight; then staged activation and measured latency/load gates. Background OS execution and delta/pagination remain separate roadmap items. Do not activate pilots based only on automated tests.
+
+
+### Phase 3 continuation — increment 23: native connectivity recovery
+
+PR #86 is merged. The iPhone automatic-sync adapter now listens to Expo Network events in addition to AppState. A definite disconnected/unreachable signal pauses and cancels only automatic work. A subsequent connected signal wakes the same shared scheduler while foregrounded, without requiring an app switch or manual reconnect. Unknown/missing state preserves the current gate; monitoring failure retains bounded AppState/manual behavior. Connectivity is a hint, not proof of account/API reachability, and cannot reset terminal authentication/capability/deletion blocks. No new auth flow, writer, queue, durable schema or request ID is introduced.
+
+Subscribe before taking an initial network snapshot; ignore stale snapshots superseded by events, late callbacks after cleanup and old-account callbacks. Duplicate connected events do not wake repeatedly. Network restoration while backgrounded never starts work. The scheduler used by both web and iPhone now retains a sole wake received during an exhausted retry cooldown as one delayed foreground attempt at the existing one-minute boundary. This does not add idle polling or reset the retry budget on scoring/duplicate events. Inactivity/unmount cancels the delayed wake; explicit successful reconnect clears it. Existing single-flight, fresh-verification, original-request receipt and local-write safeguards remain unchanged.
+
+Add Expo-SDK-57-compatible expo-network ~57.0.2 with its lock entry. It is a native module: install into a new development/TestFlight binary before testing this source, and never distribute this as a JS-only update to an existing binary without the module. No paid build has been started and no flag has been enabled. No API deployment or database migration is needed for this increment.
+
+Validation executes the actual native hook together with the shared scheduler for online recovery without AppState change, offline cancellation/resume, stale initial reads/account callbacks, duplicate/unknown network events, background/terminal parking, cooldown wake, disabled/no-subscription and monitoring failure. The existing IndexedDB/SQLite automatic-delivery suite and connection/manual regression suites remain required, as do web/mobile typechecks and iOS bundle export. These simulations and export are not native linking or physical iPhone acceptance.
+
+Software-architect final-diff review covers lifecycle/account ownership, abort/listener cleanup, stale snapshots, bounded retries, no polling, unchanged original operations/receipts and local durability, default-disabled behavior, web/native parity and native build compatibility. Review found and corrected the lost sole-restoration signal during an exhausted cooldown. Physical browser/iPhone, captive portal/real auth, two-device/mixed-client interruption, privacy/erasure and measured latency/load remain unverified activation gates. See [automatic-sync acceptance matrix](AUTOMATIC_SYNC_ACCEPTANCE.md) for the next step and required evidence. Keep all flags disabled; no merge, deployment, migration or paid build was performed.
+
+Next: run and record the browser/new-iPhone-binary and two-client matrix, resolve retention/privacy/erasure and mixed-client policies, then stage activation only after explicit authorization. Avoid adding more delivery features before these gates are exercised. OS background execution and delta/pagination remain separate roadmap items.

@@ -34,8 +34,20 @@ export function createAutomaticSync(options:{enabled:boolean;run:(signal:AbortSi
  return {
   setActive(active:boolean){if(closed)return;const resumed=active&&!live;live=active;if(!active){clear();if(flight){dirty=true;flight.abort()}}else if(resumed){this.wake()}},
   request(){if(closed||!options.enabled)return;dirty=true;arm()},
-  wake(){if(closed||!options.enabled)return;needsRefresh=true;if(blocked==='exhausted'&&clock.now()-last>=wakeCooldown){blocked=false;failures=0}dirty=true;arm()},
-  recovered(){if(closed)return;blocked=false;failures=0;},
+  wake(){
+   if(closed||!options.enabled)return;needsRefresh=true;dirty=true;
+   if(blocked==='exhausted'){
+    const remaining=last+wakeCooldown-clock.now();
+    if(remaining<=0){blocked=false;failures=0}
+    else if(live&&timer===null){
+     // One delayed response to a real wake, not polling. Connectivity may return
+     // before the cooldown ends; do not lose that sole recovery signal.
+     timer=clock.set(()=>{timer=null;if(!closed&&live&&blocked==='exhausted'){blocked=false;failures=0;arm(0)}},remaining);
+    }
+   }
+   arm();
+  },
+  recovered(){if(closed)return;if(blocked==='exhausted')clear();blocked=false;failures=0;},
   close(){closed=true;live=false;clear();flight?.abort();dirty=false}
  };
 }
