@@ -51,7 +51,8 @@ export function createConnectionStatus(timeoutMs=RECONNECT_WATCHDOG_MS,report?:(
  function reset(next:string|null){if(identity===next)return;invalidate();identity=next;publish({status:'idle',lastConnectedAt:null,diagnostic:undefined,slow:false,delivery:undefined})}
  function offline(){invalidate();publish({status:'offline',diagnostic:undefined,slow:false})}
  function fail(error:unknown){invalidate();const value=diagnostic(error,'action-'+generation,'unknown',Date.now());publish({status:needsSignIn(error)?'sign-in':'unavailable',diagnostic:value,slow:false});emit(value)}
- function connect(work:(isCurrent:()=>boolean,signal:AbortSignal,step:ConnectionStep,reportDelivery:(state:Readonly<DeliveryState>)=>void)=>Promise<void>):Promise<boolean>{
+ function connect(work:(isCurrent:()=>boolean,signal:AbortSignal,step:ConnectionStep,reportDelivery:(state:Readonly<DeliveryState>)=>void)=>Promise<void>,externalSignal?:AbortSignal):Promise<boolean>{
+  if(externalSignal?.aborted)return Promise.resolve(false);
   if(flight)return flight;
   if(identity===null)return Promise.resolve(false);
   const attempt=++generation,controller=new AbortController(),started=Date.now(),attemptId='connect-'+started.toString(36)+'-'+attempt;
@@ -73,7 +74,9 @@ export function createConnectionStatus(timeoutMs=RECONNECT_WATCHDOG_MS,report?:(
    },timeoutMs);
   });
   const workResult=Promise.resolve().then(()=>work(valid,controller.signal,step,delivery=>{if(valid())publish({delivery:{...delivery}})})).then(()=>{if(!valid())return false;publish({status:'connected',lastConnectedAt:Date.now(),diagnostic:undefined,slow:false});return true},error=>{if(!valid())return false;const value=diagnostic(error,attemptId,'unknown',started);publish({status:needsSignIn(error)?'sign-in':'unavailable',diagnostic:value,slow:false});emit(value);return false});
-  const result=Promise.race([workResult,stopped]).finally(()=>{clearTimeout(timer);clearTimeout(slowTimer);if(flight===result){flight=null;cancel=null}});
+  const abortExternal=()=>{if(valid()){invalidate();publish({status:state.lastConnectedAt?'connected':'idle',diagnostic:undefined,slow:false,delivery:state.delivery?{phase:'cancelled'}:undefined})}};
+  externalSignal?.addEventListener('abort',abortExternal,{once:true});
+  const result=Promise.race([workResult,stopped]).finally(()=>{externalSignal?.removeEventListener('abort',abortExternal);clearTimeout(timer);clearTimeout(slowTimer);if(flight===result){flight=null;cancel=null}});
   flight=result;return result;
  }
  return {getSnapshot:()=>state,subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>{listeners.delete(fn)}},reset,offline,fail,connect,whenIdle:()=>flight?flight.then(()=>{}):Promise.resolve()};

@@ -2,7 +2,7 @@ import {ApiError,type AccountStatus,type GameSummary,type GameView} from './api'
 import type {ConnectionStep} from './connection-status';
 type ReadApi={account:()=>Promise<AccountStatus>;list:()=>Promise<GameSummary[]>;get:(id:string)=>Promise<GameView>};
 /** Verify ownership before game reads or optional explicit post-verification work. */
-export async function readAccountSnapshot({api,expectedProfileId,gameId,isCurrent,step,onAccountStatus,afterAccountVerified,resolveGameId}:{api:ReadApi;expectedProfileId?:string;gameId?:string;isCurrent:()=>boolean;step:ConnectionStep;onAccountStatus?:(status:AccountStatus)=>Promise<void>;afterAccountVerified?:(status:AccountStatus)=>Promise<void>;resolveGameId?:(id:string|undefined)=>Promise<string|undefined>}){
+export async function readAccountSnapshot({api,expectedProfileId,gameId,isCurrent,step,onAccountStatus,afterAccountVerified,resolveGameId,deliveryOnly=false}:{api:ReadApi;deliveryOnly?:boolean;expectedProfileId?:string;gameId?:string;isCurrent:()=>boolean;step:ConnectionStep;onAccountStatus?:(status:AccountStatus)=>Promise<void>;afterAccountVerified?:(status:AccountStatus)=>Promise<void>;resolveGameId?:(id:string|undefined)=>Promise<string|undefined>}){
  if(!isCurrent())return null;
  const status=await step('account',async()=>{
   const account=await api.account();
@@ -15,6 +15,7 @@ export async function readAccountSnapshot({api,expectedProfileId,gameId,isCurren
  });
  if(!isCurrent())return null;
  await afterAccountVerified?.(status);if(!isCurrent())return null;
+ if(deliveryOnly)return {status,saved:[] as GameSummary[],latest:null};
  const selected=resolveGameId?await resolveGameId(gameId):gameId;if(!isCurrent())return null;
  const [saved,latest]=await Promise.all([step('games',()=>api.list()),selected?step('game',()=>api.get(selected)):Promise.resolve(null)]);
  return isCurrent()?{status,saved,latest}:null;

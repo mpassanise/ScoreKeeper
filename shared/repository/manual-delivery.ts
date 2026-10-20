@@ -28,10 +28,16 @@ export function manualDeliveryText(state:Readonly<DeliveryState>|undefined):stri
  * Repeated gestures share the same intent; a different account cannot adopt it. */
 export function createManualSync(){
  let active:{key:string;promise:Promise<boolean>}|null=null;
- return {run(key:string,isCurrent:()=>boolean,waitForRead:()=>Promise<void>,work:()=>Promise<boolean>){
+ function run(key:string,isCurrent:()=>boolean,waitForRead:()=>Promise<void>,work:()=>Promise<boolean>){
   if(active?.key===key)return active.promise;
   const pass={key,promise:undefined! as Promise<boolean>};
   pass.promise=Promise.resolve().then(async()=>{await waitForRead();return isCurrent()?work():false}).finally(()=>{if(active===pass)active=null});
   active=pass;return pass.promise;
+ }
+ return {run,runAfter(key:string,isCurrent:()=>boolean,waitForRead:()=>Promise<void>,work:()=>Promise<boolean>){
+  // A save queued after an earlier pass took its snapshot must not disappear
+  // into that pass's result. Wait, then capture a fresh delivery intent.
+  const prior=active?.key===key?active.promise:Promise.resolve(false);
+  return prior.catch(()=>false).then(()=>isCurrent()?run(key,isCurrent,waitForRead,work):false);
  }};
 }

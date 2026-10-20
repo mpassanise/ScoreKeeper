@@ -1,4 +1,6 @@
 "use client";
+import {useAutomaticSync} from './useAutomaticSync';
+import {automaticResult} from '../../shared/repository/automatic-sync';
 import type {AdoptionReview} from '../../shared/repository/adoption-source';
 import {createScoringWriter,type DeleteGameTarget} from '../../shared/repository/scoring-writer';
 import {gameSummary,homeStatus,type AccountGameHome} from '../../shared/repository/game-home';
@@ -31,6 +33,7 @@ const gameScreenPilot=process.env.NEXT_PUBLIC_CONFIRMED_CACHE_PILOT==='true'&&pr
 const gameRecoveryPilot=gameScreenPilot&&process.env.NEXT_PUBLIC_GAME_RECOVERY_PILOT==='true';
 const gameDeliveryPilot=gameRecoveryPilot&&process.env.NEXT_PUBLIC_GAME_DELIVERY_PILOT==='true';
 const gameScoringPilot=gameDeliveryPilot&&process.env.NEXT_PUBLIC_GAME_SCORING_PILOT==='true';
+const automaticDeliveryPilot=gameScoringPilot&&process.env.NEXT_PUBLIC_GAME_COLD_WRITES_PILOT==='true'&&process.env.NEXT_PUBLIC_GAME_AUTOMATIC_SYNC_PILOT==='true';
 const cloudApi=new ScorekeeperApi(cloudConfig.api||"http://localhost:7071/api",token,{readOnlyGames:gameScreenPilot});
 import {needsAdvancedRules} from "../../shared/presets";
 import GameSetup from "./GameSetup";
@@ -77,7 +80,8 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
  const canUseAccount=(owner:string|null)=>!!owner&&!accountBarrier.current&&identity.current===owner;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;identity.current=null;connection.reset(null)}},[connection]);
  const accountBarrier=useRef(false);
- const pilot=useRepositoryPilot(()=>{accountBarrier.current=true;if(identity.current)try{sessionStorage.setItem(reconnectDraftKey,JSON.stringify({identity:identity.current,gameId:view?.game.id,deviceOnly:view?.game.deviceOnly,gameVersion:view?.game.version,next:view?.game.next,points,creating,name,names,settings,presetId} satisfies ReconnectDraft))}catch{/* Input remains in memory. */}activity.current++;identity.current=null;setView(null);setEditingGame(null);setGames(previous=>previous.filter(g=>g.deviceOnly));connection.fail(Object.assign(new Error('Account changed. Sign in to reconnect.'),{code:'SIGN_IN_REQUIRED'}));setNotice('Account access changed. Your unsent input has been kept. Sign in to reconnect.');});
+ const automatic=useAutomaticSync(automaticDeliveryPilot,loaded&&account&&canUseAccount(identity.current)?identity.current:null,async (signal,refreshReads)=>{const ok=await syncGames(true,false,signal,refreshReads);return signal.aborted?'cancelled':automaticResult(ok,connection.getSnapshot())});
+ const pilot=useRepositoryPilot(()=>{accountBarrier.current=true;if(identity.current)try{sessionStorage.setItem(reconnectDraftKey,JSON.stringify({identity:identity.current,gameId:view?.game.id,deviceOnly:view?.game.deviceOnly,gameVersion:view?.game.version,next:view?.game.next,points,creating,name,names,settings,presetId} satisfies ReconnectDraft))}catch{/* Input remains in memory. */}activity.current++;identity.current=null;setView(null);setEditingGame(null);setGames(previous=>previous.filter(g=>g.deviceOnly));connection.fail(Object.assign(new Error('Account changed. Sign in to reconnect.'),{code:'SIGN_IN_REQUIRED'}));setNotice('Account access changed. Your unsent input has been kept. Sign in to reconnect.');},automatic.request);
  const [home,setHome]=useState<{owner:typeof identity.current;selector:string;seeds:GameSummary[];value:AccountGameHome|null;error:boolean}|null>(null);
  const [copiesOpen,setCopiesOpen]=useState(false);
  useEffect(()=>{
@@ -96,7 +100,7 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
   if(!review||!canUseAccount(owner)||activity.current!==epoch)return;
   setAccountRead(review.read);setView(review.read.kind==='game'?review.read.view:null);setCreating(false);setRecovery({review,scope,owner});
  })}
- async function preparePilot(owner:string){try{return await pilot.ref.current?.prepare(owner)??null}catch(error){if(gameScreenPilot)throw error;setNotice('Could not prepare device storage. Account games remain online-only.');return null}}
+ async function preparePilot(owner:string,keepScope=false){try{return await pilot.ref.current?.prepare(owner,keepScope)??null}catch(error){if(gameScreenPilot)throw error;setNotice('Could not prepare device storage. Account games remain online-only.');return null}}
  async function rememberRead(scope:ReturnType<NonNullable<typeof pilot.ref.current>['capture']>,value:GameView){try{await pilot.ref.current?.record(scope,value)}catch{setNotice('Could not save a device copy. Your account game is still saved.');}}
  async function reconnectSignIn(){
   if(locked.current)return;
@@ -128,23 +132,25 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
     if(draft.gameId)restoreGame.current=draft;else sessionStorage.removeItem(reconnectDraftKey);
    }
   }catch{/* A malformed draft never replaces saved games. */}
-  if(navigator.onLine)void syncGames();else connection.offline();
+  if(navigator.onLine){if(!automaticDeliveryPilot)void syncGames()}else connection.offline();
  })().catch(e=>{if(active){setError(e instanceof Error?e.message:'Could not restore games.');setLoaded(true)}});return()=>{active=false}},[]);
  useEffect(()=>{
   const update=()=>{setOnline(navigator.onLine);if(!navigator.onLine)connection.offline()};
   update();window.addEventListener("online",update);window.addEventListener("offline",update);
   return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update)};
  },[connection]);
- async function syncGames(manual=false,queued=false):Promise<boolean>{
+ async function syncGames(manual=false,queued=false,automaticSignal?:AbortSignal,refreshReads=true):Promise<boolean>{
+  if(automaticSignal?.aborted)return false;
   const owner=identity.current;if(!owner||locked.current||accountBarrier.current)return false;
-  if(manual&&gameDeliveryPilot&&!queued)return manualSync.run(owner,()=>canUseAccount(owner),connection.whenIdle,()=>syncGames(true,true));
+  if(manual&&gameDeliveryPilot&&!queued){const result=await (automaticSignal?manualSync.runAfter:manualSync.run)(owner,()=>canUseAccount(owner)&&!automaticSignal?.aborted,connection.whenIdle,()=>syncGames(true,true,automaticSignal,refreshReads));if(result&&!automaticSignal&&canUseAccount(owner))automatic.recovered();return result}
   connection.reset(owner);
   return connection.connect(async(isCurrent,signal,step,reportDelivery)=>{
-   const valid=()=>mounted.current&&isCurrent()&&identity.current===owner&&!accountBarrier.current;
+   const valid=()=>mounted.current&&isCurrent()&&!automaticSignal?.aborted&&identity.current===owner&&!accountBarrier.current;
+   if(!valid())return;
    const currentContext=context.current,revision=activity.current,draft=restoreGame.current;
    const readApi=new ScorekeeperApi(cloudConfig.api||"http://localhost:7071/api",()=>step('authentication',token),{signal,readAttempts:1,readOnlyGames:gameScreenPilot});
    const selected=currentContext.view&&!currentContext.view.game.deviceOnly?currentContext.view.game.id:(!currentContext.view&&draft?.identity===owner?draft.gameId:undefined);
-   const scope=await preparePilot(owner);if(!valid())return;
+   const scope=await preparePilot(owner,!!automaticSignal);if(!valid())return;
    const status=await step('account',()=>readApi.account());
    if(!valid())return;
    if((await auth()).getActiveAccount()?.homeAccountId!==owner){identity.current=null;connection.reset(null);return}
@@ -160,6 +166,16 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
      const response=await instance.acquireTokenSilent({scopes:[cloudConfig.scope],account:captured});
      if(!current())throw Object.assign(new Error('Account access changed. Saved changes have been kept.'),{code:'STALE_ACCOUNT'});return response.accessToken;
     }}));if(!valid())return;
+   }
+   if(automaticSignal&&!refreshReads){
+    const read=selected&&scope?await pilot.ref.current!.readGame(scope,selected):null;if(!valid())return;
+    setGames(previous=>[...previous]);
+    if(read&&revision===activity.current&&context.current.view===currentContext.view){
+     if(read.kind!=='game'){setAccountRead(read);setView(null);rulesEditor.current++;setEditingGame(null);setEdit(null)}
+     else if(!context.current.points&&!context.current.edit&&!context.current.editingGame&&!context.current.reordering){setAccountRead(read);setView(read.view)}
+     else if(read.sync==='needs-review')setAccountRead(read);
+    }
+    return;
    }
    let screenRead:AccountGameRead|null=null,readSelected=selected;
    if(gameScreenPilot&&selected&&pilot.ref.current&&scope&&!(draft?.deviceOnly&&!currentContext.view)){
@@ -189,7 +205,7 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
    if(status.profileId){await step('players',()=>setFrequentPlayersAccount(status.profileId!,cloudApi));if(!valid())return;await step('players',()=>syncFrequentPlayers())}
    const pending=await step('imports',()=>(gameScreenPilot?Promise.resolve([]):pendingImports(localApi,readApi,saved,valid)));if(!valid())return;setLocalCount(pending.length);
    const user=(await auth()).getActiveAccount();if(valid()&&user?.homeAccountId===owner&&status.profileId)try{localStorage.setItem('scorekeeper-player-profile:'+owner,status.profileId)}catch{}
-  });
+  },automaticSignal);
  }
 
  async function enterGuest(){await run(async()=>{setGames(await localApi.list());setView(null);setGuest(true)})}

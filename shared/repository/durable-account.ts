@@ -12,9 +12,9 @@ import {recoveryReview} from './game-recovery';
 import {readCollisionFile,checkedCollisionFile,readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
 import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
-import {clearGameReadCache,createGameOutbox,OutboxError,importedGameIds} from './game-outbox';
+import {clearGameReadCache,createGameOutbox,OutboxError,importedGameIds,appendableOperations} from './game-outbox';
 import type {AtomicDocuments,DocumentRecord} from './documents';
-type Active={selector:string;profileId:string;offlineWriteGrant?:unknown};
+type Active={selector:string;profileId:string;offlineWriteGrant?:unknown;operationSupport?:string};
 type Pending={selector:string;expectedProfileId?:string};
 type Lifecycle={schemaVersion:1;active:Active|null;pending:Pending|null;blockedProfiles:string[]};
 export type DurableLease=Readonly<{kind:'account';revision:number;selector:string;profileId:string}>;
@@ -28,8 +28,8 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
  return value;
 }
 /** Durable account state shared by IndexedDB and SQLite; no tokens or email keys. */
-export function createDurableAccountRepository(repository:ConfirmedGames,options:{coldWritesEnabled?:boolean}={}){
- const coldWritesEnabled=options.coldWritesEnabled===true;
+export function createDurableAccountRepository(repository:ConfirmedGames,options:{coldWritesEnabled?:boolean;allowPendingWrites?:boolean}={}){
+ const coldWritesEnabled=options.coldWritesEnabled===true,allowPendingWrites=coldWritesEnabled&&options.allowPendingWrites===true;
  const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),restoredRights=new WeakMap<object,string>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>(),imports=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
  function stopDeliveries(proof?:DurableLease|VerificationTicket){
   clearGameReadCache(documents,proof?{key:KEY,revision:proof.revision}:undefined);
@@ -65,7 +65,10 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
   if(expected&&expected!==profileId){await write(record!.revision,{...state,active:null,pending:null});throw new AccountAccessError('PROFILE_MISMATCH')}
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
   const grant=coldWritesEnabled?verifiedOfflineGrant(proof.selector,status):undefined;
-  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId,...(grant?{offlineWriteGrant:grant}:{})}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);return lease;
+  const active:Active={selector:proof.selector,profileId,...(grant?{offlineWriteGrant:grant}:{}),...(allowPendingWrites?{operationSupport:canonical({scoring:scoringSupported,completion:completionSupported,corrections:correctionsSupported,rules:rulesSupported,deletion:deletionSupported,imports:scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import')})}:{})};
+  // Background verification of unchanged ownership/support must not revoke
+  // another tab's legitimate local write or rotate the lifecycle every pass.
+  const next=allowPendingWrites&&proof.kind==='account'&&canonical(state.active)===canonical(active)?record!:await write(record!.revision,{...state,pending:null,active}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);return lease;
  }
  async function withReview(proof:DurableLease,gameId:string,read:AccountGameRead):Promise<AccountGameRead>{
   const collision=await readGameCollision(documents,proof.profileId,gameId);await current(proof);
@@ -102,7 +105,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
    return withReview(proof,gameId,cached?{kind:'game',source:'cache',sync:'confirmed',view:cached.view,pendingOperations:0,serverVersion:cached.serverVersion}:{kind:'missing'});
   },
   async readScoringGame(proof:DurableLease,gameId:string):Promise<AccountGameRead>{
-   account(proof);await current(proof);const saved=await api.outbox(proof).scoringRead(gameId);
+   account(proof);await current(proof);const saved=await api.outbox(proof).scoringRead(gameId,allowPendingWrites);
    const read=saved.read?await withReview(proof,gameId,saved.read):await api.readGame(proof,gameId);await current(proof);
    if(read.kind!=='game')return read;
    const permission=offlineWrites.has(proof)&&scoring.has(proof),ready=permission&&saved.eligible&&read.sync!=='needs-review';
@@ -180,13 +183,14 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
    if(operation.command.action==='rules'&&!rules.has(proof))throw new AccountAccessError('SYNC_UNAVAILABLE');
    }
    const outbox=api.outbox(proof);
-   try{
-    await outbox.enqueue(operation,true);
+   for(let attempt=0;;attempt++)try{
+    await outbox.enqueue(operation,true,[],'write',allowPendingWrites);break;
    }catch(error){
     if(['STALE_ACCOUNT','PROFILE_MISMATCH','ACCOUNT_DELETING','OPERATION_ID_REUSED'].includes((error as {code?:string})?.code??''))throw error;
     // A failed local acknowledgement is not proof of rollback. Confirm this
     // exact immutable request before allowing a new intent or clearing input.
     try{if(await outbox.hasOperation(operation))return api.readScoringGame(proof,operation.gameId)}catch(probeError){if(['STALE_ACCOUNT','PROFILE_MISMATCH','ACCOUNT_DELETING','OPERATION_ID_REUSED'].includes((probeError as {code?:string})?.code??''))throw probeError;throw Object.assign(new Error('The local save could not be confirmed. Retry this save; your input has been kept.'),{code:'SAVE_UNCONFIRMED'})}
+    if(allowPendingWrites&&attempt===0&&(error as {code?:string})?.code==='STORAGE_CONFLICT')continue;
     throw Object.assign(error instanceof Error?error:new Error('Score could not be saved.'),{definitelyNotSaved:true});
    }
    return api.readScoringGame(proof,operation.gameId);
@@ -199,7 +203,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
    for(let i=0;i<rows.length;i+=16)await Promise.all(rows.slice(i,i+16).map(async row=>{
     const saved=await readCollisionFile(documents,proof.profileId,row.gameId);if(saved.file?.active)row.sync='needs-review';if(saved.file?.history.length)row.retained=true;
    }));
-   const tracked=new Map(saved.state.games.map(game=>[game.gameId,game]));for(const row of rows){const game=tracked.get(row.gameId);row.canDelete=offlineWrites.has(proof)&&deletion.has(proof)&&row.sync!=='needs-review'&&!!game?.projection&&!game.projection.game.finished&&!game.tombstone&&game.operations.every(op=>op.status==='queued')}
+   const tracked=new Map(saved.state.games.map(game=>[game.gameId,game]));for(const row of rows){const game=tracked.get(row.gameId);row.canDelete=offlineWrites.has(proof)&&deletion.has(proof)&&row.sync!=='needs-review'&&!!game?.projection&&!game.projection.game.finished&&!game.tombstone&&appendableOperations(game,allowPendingWrites)}
    await current(proof);if((await documents.read('game-outbox:'+proof.profileId))?.revision!==saved.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Saved changes updated. Reconnect to refresh the list.');await current(proof);return {...homeResult(rows),profileId:proof.profileId,adoptedGameIds};
   },
   async readRecovery(proof:DurableLease,gameId:string){

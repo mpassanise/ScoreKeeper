@@ -9,17 +9,19 @@ const resolution=recovery&&process.env.NEXT_PUBLIC_GAME_COLLISION_RESOLUTION_PIL
 const delivery=recovery&&process.env.NEXT_PUBLIC_GAME_DELIVERY_PILOT==='true';
 const scoring=delivery&&process.env.NEXT_PUBLIC_GAME_SCORING_PILOT==='true';
 const coldWrites=scoring&&process.env.NEXT_PUBLIC_GAME_COLD_WRITES_PILOT==='true';
+const automatic=coldWrites&&process.env.NEXT_PUBLIC_GAME_AUTOMATIC_SYNC_PILOT==='true';
 const adoption=scoring&&process.env.NEXT_PUBLIC_GAME_ADOPTION_REVIEW_PILOT==='true';
 const admission=adoption&&process.env.NEXT_PUBLIC_GAME_ADOPTION_IMPORT_PILOT==='true';
 const staging=process.env.NEXT_PUBLIC_LEGACY_STAGING_PILOT==='true';
 const channelName='scorekeeper-repository-invalidated';
-export function useRepositoryPilot(onInvalidated:()=>void){
+export function useRepositoryPilot(onInvalidated:()=>void,onQueued?:()=>void){
  const ref=useRef<RepositoryPilot|null>(null),callback=useRef(onInvalidated);callback.current=onInvalidated;
+ const queued=useRef(onQueued);queued.current=onQueued;
  const [review,setReview]=useState({busy:false,message:''});
  useEffect(()=>{
   if(!enabled)return;
   const channel=typeof BroadcastChannel==='undefined'?null:new BroadcastChannel(channelName);
-  const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:recovery,scoringEnabled:scoring,coldWritesEnabled:coldWrites,adoptionEnabled:adoption,admissionEnabled:admission,collisionResolutionEnabled:resolution,deliveryEnabled:delivery,open:()=>openConfirmedGames(indexedDB),onInvalidated:()=>callback.current(),publish:()=>{channel?.postMessage('changed');try{localStorage.setItem(channelName,crypto.randomUUID())}catch{/* Focus recheck remains available. */}}});ref.current=pilot;
+  const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:recovery,scoringEnabled:scoring,coldWritesEnabled:coldWrites,automaticSyncEnabled:automatic,onQueued:()=>queued.current?.(),adoptionEnabled:adoption,admissionEnabled:admission,collisionResolutionEnabled:resolution,deliveryEnabled:delivery,open:()=>openConfirmedGames(indexedDB),onInvalidated:()=>callback.current(),publish:()=>{channel?.postMessage('changed');try{localStorage.setItem(channelName,crypto.randomUUID())}catch{/* Focus recheck remains available. */}}});ref.current=pilot;
   const recheck=()=>{void pilot.recheck().catch(error=>{if(ref.current===pilot&&(error as {code?:string})?.code!=='STALE_ACCOUNT')callback.current()})};
   const storage=(e:StorageEvent)=>{if(e.key===channelName)recheck()};
   channel?.addEventListener('message',recheck);window.addEventListener('storage',storage);window.addEventListener('focus',recheck);

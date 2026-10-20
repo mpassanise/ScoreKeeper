@@ -12,7 +12,7 @@ export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
 /** Gated account repository pilot. Manual delivery is separately disabled;
  * score admission has its own flag; no automatic adoption/replay is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;coldWritesEnabled?:boolean;adoptionEnabled?:boolean;admissionEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;coldWritesEnabled?:boolean;automaticSyncEnabled?:boolean;adoptionEnabled?:boolean;admissionEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onQueued?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
@@ -33,13 +33,13 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   if(code==='STALE_ACCOUNT'||code==='PROFILE_MISMATCH'||code==='ACCOUNT_DELETING')invalidateScope(scope);
  }
  function serial<T>(work:()=>Promise<T>):Promise<T>{const result=tail.then(work);tail=result.catch(()=>{});return result}
- async function repository(){if(closed||!options.enabled)throw stale();return opening??=(options.open().then(async raw=>{if(closed){await raw.close();throw stale()}return {raw,access:createDurableAccountRepository(raw,{coldWritesEnabled:options.scoringEnabled===true&&options.coldWritesEnabled===true})}}).catch(e=>{opening=undefined;throw e}))}
+ async function repository(){if(closed||!options.enabled)throw stale();return opening??=(options.open().then(async raw=>{if(closed){await raw.close();throw stale()}return {raw,access:createDurableAccountRepository(raw,{coldWritesEnabled:options.scoringEnabled===true&&options.coldWritesEnabled===true,allowPendingWrites:options.scoringEnabled===true&&options.coldWritesEnabled===true&&options.automaticSyncEnabled===true})}}).catch(e=>{opening=undefined;throw e}))}
  function valid(scope:ReadScope){if(closed||!options.enabled||!scopes.has(scope)||selector!==scope.selector||generation!==scope.generation)throw stale()}
  function capture():ReadScope|null{if(!options.enabled||closed||!selector)return null;const scope=Object.freeze({selector,generation});scopes.add(scope);return scope}
  function select(next:string|null){if(!options.enabled||closed||selector===next)return;stopDelivery();generation++;selector=next;lease=undefined;proof=undefined;deletionSelector=null}
  return {
   enabled:options.enabled,select,capture,invalidate(scope:ReadScope|null){if(scope)invalidateScope(scope)},
-  prepare(next:string){select(next);stopDelivery();generation++;const scope=capture();return serial(async()=>{if(!options.enabled)return null;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);proof=(await access.restore(next))??undefined;valid(scope);proof=proof??await access.beginVerification(next);valid(scope);lease=proof.kind==='account'?proof:undefined;return scope})},
+  prepare(next:string,keepScope=false){select(next);if(keepScope&&lease&&proof===lease){const scope=capture();return serial(async()=>{if(!scope)throw stale();valid(scope);return scope})}stopDelivery();generation++;const scope=capture();return serial(async()=>{if(!options.enabled)return null;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);proof=(await access.restore(next))??undefined;valid(scope);proof=proof??await access.beginVerification(next);valid(scope);lease=proof.kind==='account'?proof:undefined;return scope})},
   verify(scope:ReadScope|null,status:AccountStatus){return serial(async()=>{if(!options.enabled)return;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);
    if(!proof)throw new AccountAccessError('ACCOUNT_UNVERIFIED');valid(scope);stopDelivery();
    try{lease=await access.verify(proof,status)}catch(error){invalidate(scope,error);throw error}
@@ -69,7 +69,7 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   admitAdoption(scope:ReadScope|null,review:AdoptionReview,raw:string){return serial(async()=>{
    if(!options.enabled||!options.scoringEnabled||!options.adoptionEnabled||!options.admissionEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');
    const stored=adoptions.get(review);if(!stored||stored.selector!==scope.selector||stored.profileId!==lease.profileId)throw stale();const captured=lease,{access}=await repository();valid(scope);
-   try{const read=await access.admitAdoption(captured,stored.ticket,raw,stored.gameId);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
+   try{const read=await access.admitAdoption(captured,stored.ticket,raw,stored.gameId);valid(scope);options.publish?.();try{options.onQueued?.()}catch{/* Scheduling cannot turn a durable save into a failure. */}return read}catch(error){invalidate(scope,error);throw error}
   })},
   prepareScoring(scope:ReadScope|null,input:GameView,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameView;return serial(async()=>{
    if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;
@@ -79,7 +79,7 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   })},
   enqueueScoring(scope:ReadScope|null,input:GameWriteOperation,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameWriteOperation;return serial(async()=>{
    if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;if(captured.profileId!==expectedProfileId)throw Object.assign(new Error('This save belongs to a different account profile. Its input has been kept.'),{code:'SCORING_BINDING_CHANGED'});const {access}=await repository();valid(scope);
-   try{const read=await access.enqueueScoring(captured,detached);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
+   try{const read=await access.enqueueScoring(captured,detached);valid(scope);options.publish?.();try{options.onQueued?.()}catch{/* Scheduling cannot turn a durable save into a failure. */}return read}catch(error){invalidate(scope,error);throw error}
   })},
   readHome(scope:ReadScope|null,seeds:GameSummary[]){const detached=JSON.parse(JSON.stringify(seeds)) as GameSummary[];return serial(async()=>{
    if(!options.enabled||!options.recoveryEnabled)return null;if(!scope)throw stale();valid(scope);
