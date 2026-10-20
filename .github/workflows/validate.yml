@@ -55,6 +55,7 @@ jobs:
       - run: node scripts/test-sqlite-repository.mjs
       - run: node scripts/test-account-access.mjs
       - run: node scripts/test-durable-repository.mjs
+      - run: node scripts/test-cold-write-grant.mjs
       - run: node scripts/test-game-outbox.mjs
       - run: node scripts/test-game-reconciliation.mjs
       - run: node scripts/test-game-delivery.mjs

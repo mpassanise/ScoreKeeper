@@ -1,3 +1,4 @@
+import {verifiedOfflineGrant,checkedOfflineGrant,type OfflineWriteGrant} from './offline-write-grant';
 import {adoptionSource,adoptionKey,adoptionIndexKey,adoptionReservation,checkedAdoption,checkedAdoptionIndex,adoptionReview,type AdoptionDraft} from './adoption-source';
 import {supportsQueuedScoring,supportsQueuedCompletion,supportsQueuedCorrections,supportsQueuedRules,supportsQueuedDeletion} from './scoring-writer';
 import {canEditGame} from '../game-edit';
@@ -13,7 +14,7 @@ import {createOperationTransport} from './operation-transport';
 import {createGameDelivery,type DeliveryTransport,type DeliveryOptions} from './game-delivery';
 import {clearGameReadCache,createGameOutbox,OutboxError,importedGameIds} from './game-outbox';
 import type {AtomicDocuments,DocumentRecord} from './documents';
-type Active={selector:string;profileId:string};
+type Active={selector:string;profileId:string;offlineWriteGrant?:unknown};
 type Pending={selector:string;expectedProfileId?:string};
 type Lifecycle={schemaVersion:1;active:Active|null;pending:Pending|null;blockedProfiles:string[]};
 export type DurableLease=Readonly<{kind:'account';revision:number;selector:string;profileId:string}>;
@@ -27,8 +28,9 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
  return value;
 }
 /** Durable account state shared by IndexedDB and SQLite; no tokens or email keys. */
-export function createDurableAccountRepository(repository:ConfirmedGames){
- const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>(),imports=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
+export function createDurableAccountRepository(repository:ConfirmedGames,options:{coldWritesEnabled?:boolean}={}){
+ const coldWritesEnabled=options.coldWritesEnabled===true;
+ const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),restoredRights=new WeakMap<object,string>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>(),imports=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
  function stopDeliveries(proof?:DurableLease|VerificationTicket){
   clearGameReadCache(documents,proof?{key:KEY,revision:proof.revision}:undefined);
   for(const [worker,lease]of deliveries){
@@ -40,17 +42,30 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
  function account(proof:DurableLease){check(proof);if(proof.kind!=='account')throw new AccountAccessError('ACCOUNT_UNVERIFIED')}
  async function current(proof:DurableLease|VerificationTicket){check(proof);const record=await documents.read(KEY),state=lifecycle(record);check(proof);
   if(record?.revision!==proof.revision||(proof.kind==='account'?state.active?.selector!==proof.selector||state.active.profileId!==proof.profileId:state.pending?.selector!==proof.selector))throw new AccountAccessError('STALE_ACCOUNT');
+  const retained=restoredRights.get(proof);if(retained!==undefined&&(proof.kind!=='account'||canonical(checkedOfflineGrant(state.active?.offlineWriteGrant,proof.selector,proof.profileId))!==retained))throw new AccountAccessError('STALE_ACCOUNT');
   return {record,state};
  }
  async function write(expected:number,state:Lifecycle){if(closed)throw new AccountAccessError('STALE_ACCOUNT');try{return await documents.write(KEY,expected,state)}catch(error){if(error instanceof LocalRepositoryError&&error.code==='STORAGE_CONFLICT')throw new AccountAccessError('STALE_ACCOUNT');throw error}}
- async function accept(proof:DurableLease|VerificationTicket,status:AccountStatus){
+ function localRights(proof:DurableLease,grant:OfflineWriteGrant){
+  restoredRights.set(proof,canonical(grant));
+  offlineWrites.add(proof);scoring.add(proof);
+  if(grant.completion)completion.add(proof);if(grant.corrections)corrections.add(proof);if(grant.rules)rules.add(proof);if(grant.deletion)deletion.add(proof);
+ }
+ async function accept(proof:DurableLease|VerificationTicket,input:AccountStatus){
+  const status=JSON.parse(JSON.stringify(input)) as AccountStatus;
   const scoringSupported=supportsQueuedScoring(status.gameOperations),completionSupported=supportsQueuedCompletion(status.gameOperations),correctionsSupported=supportsQueuedCorrections(status.gameOperations),rulesSupported=supportsQueuedRules(status.gameOperations),deletionSupported=supportsQueuedDeletion(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);completion.delete(proof);corrections.delete(proof);rules.delete(proof);deletion.delete(proof);imports.delete(proof);}
   const {record,state}=await current(proof),profileId=status.profileId;
-  if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');
+  if(!nonempty(profileId)){
+   // An incomplete response is not a verified revocation. Keep previously
+   // committed local rights, while network/import permissions remain revoked.
+   if(coldWritesEnabled&&proof.kind==='account'){const grant=checkedOfflineGrant(state.active?.offlineWriteGrant,proof.selector,proof.profileId);if(grant)localRights(proof,grant)}
+   throw new AccountAccessError('ACCOUNT_UNVERIFIED');
+  }
   const expected=proof.kind==='account'?proof.profileId:state.pending?.expectedProfileId;
   if(expected&&expected!==profileId){await write(record!.revision,{...state,active:null,pending:null});throw new AccountAccessError('PROFILE_MISMATCH')}
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
-  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);return lease;
+  const grant=coldWritesEnabled?verifiedOfflineGrant(proof.selector,status):undefined;
+  const next=await write(record!.revision,{...state,pending:null,active:{selector:proof.selector,profileId,...(grant?{offlineWriteGrant:grant}:{})}}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);return lease;
  }
  async function withReview(proof:DurableLease,gameId:string,read:AccountGameRead):Promise<AccountGameRead>{
   const collision=await readGameCollision(documents,proof.profileId,gameId);await current(proof);
@@ -68,7 +83,10 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
   async restore(selector:string):Promise<DurableLease|null>{
    if(closed)throw new AccountAccessError('STALE_ACCOUNT');const record=await documents.read(KEY),state=lifecycle(record);
    if(closed)throw new AccountAccessError('STALE_ACCOUNT');
-   return record&&state.active?.selector===selector?issue({kind:'account' as const,revision:record.revision,...state.active}):null;
+   if(!record||state.active?.selector!==selector)return null;
+   const lease=issue({kind:'account' as const,revision:record.revision,selector:state.active.selector,profileId:state.active.profileId});
+   if(coldWritesEnabled){const grant=checkedOfflineGrant(state.active.offlineWriteGrant,selector,state.active.profileId);if(grant)localRights(lease,grant)}
+   return lease;
   },
   async signOut(proof:DurableLease|VerificationTicket){check(proof);stopDeliveries(proof);const {record,state}=await current(proof);await write(record!.revision,{...state,active:null,pending:null})},
   async isDeletionBlocked(profileId:string){if(closed)throw new AccountAccessError('STALE_ACCOUNT');if(!nonempty(profileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED');const state=lifecycle(await documents.read(KEY));if(closed)throw new AccountAccessError('STALE_ACCOUNT');return state.blockedProfiles.includes(profileId)},
