@@ -49,5 +49,8 @@ try{
   const failure=connection.connect(async(isCurrent,signal,tracked)=>readAccountSnapshot({api:new ScorekeeperApi('https://example.test/api',async()=>'token',{signal,readAttempts:2}),isCurrent,step:tracked}));
   assert.equal(await failure,false);assert.equal(requests.length,1);assert.equal(connection.getSnapshot().status,'sign-in');
  }finally{mock.timers.reset()}
+ {
+  let verified=0,delivered=0;const only={account:async()=>({profileId:'A'}),list:async()=>assert.fail('Delivery-only pass must not fetch list'),get:async()=>assert.fail('Delivery-only pass must not fetch selected game')};const result=await readAccountSnapshot({api:only,deliveryOnly:true,expectedProfileId:'A',gameId:'selected',isCurrent:()=>true,step,onAccountStatus:async()=>{verified++},afterAccountVerified:async()=>{delivered++}});assert.equal(verified,1);assert.equal(delivered,1);assert.equal(result.latest,null);assert.deepEqual(result.saved,[]);
+ }
  console.log('Account refresh: account-first order, no premature game/player requests, identity/deletion guards, late-result isolation, timeout recovery within one connection attempt and 401 non-retry passed.');
 }finally{globalThis.fetch=originalFetch;rmSync(output,{recursive:true,force:true})}

@@ -106,6 +106,11 @@ try{
   assert.equal(c.getSnapshot().diagnostic.code,'RECONNECT_TIMEOUT');assert.equal(reports.length,1);
   pending.resolve();await turn();assert.equal(reports.length,1,'late completion emits no extra failure');
  }finally{mock.timers.reset()}
+ {
+  const c=createConnectionStatus(),pending=deferred(),external=new AbortController();let signal,late=false;c.reset('A');const pass=c.connect(async(valid,s)=>{signal=s;await pending.promise;if(valid())late=true},external.signal);await turn();external.abort();assert.equal(await pass,false);assert.equal(signal.aborted,true);assert.equal(c.getSnapshot().status,'idle');pending.resolve();await turn();assert.equal(late,false);assert.equal(c.getSnapshot().lastConnectedAt,null);
+  const already=new AbortController();already.abort();assert.equal(await c.connect(async()=>assert.fail('Aborted before network'),already.signal),false);
+  const next=deferred();c.reset('B');const manual=c.connect(async()=>next.promise);external.abort();next.resolve();assert.equal(await manual,true,'old cancellation cannot cancel a new manual/account pass');
+ }
  console.log('Connection recovery: single-flight, account isolation, offline/retry, auth classification, bounded timeout, cancelled I/O and token-wait cancellation passed.');
 }finally{globalThis.fetch=originalFetch;rmSync(output,{recursive:true,force:true})}
 
