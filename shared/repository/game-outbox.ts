@@ -19,8 +19,8 @@ export class OutboxError extends Error{
  constructor(readonly code:'INVALID_OPERATION'|'OPERATION_ID_REUSED'|'QUEUE_FULL'|'NEEDS_REVIEW'|'INVALID_ACKNOWLEDGEMENT'|'CAPABILITY_REQUIRED',message:string){super(message);this.name='OutboxError'}
 }
 export type QueuedOperation={wire:string;status:'queued'|'uncertain'|'applied'|'rejected';localTime:string;acknowledgement?:OperationAcknowledgement};
-export type QueuedGame={gameId:string;base:ConfirmedSnapshot|null;projection:GameView|null;operations:QueuedOperation[];reservedEntryIds:string[];candidate?:ConfirmedSnapshot;tombstone?:{version:number}};
-export type ArchivedBatch={id:string;gameId:string;kind:'confirmed'|'account-selected';serverVersion:number;operations:QueuedOperation[];recovery?:{base:ConfirmedSnapshot|null;projection:GameView|null;reservedEntryIds:string[]};selected?:ConfirmedSnapshot|{deleted:true;version:number}};
+export type QueuedGame={gameId:string;base:ConfirmedSnapshot|null;projection:GameView|null;operations:QueuedOperation[];reservedEntryIds:string[];beforeDelete?:GameView;candidate?:ConfirmedSnapshot;tombstone?:{version:number}};
+export type ArchivedBatch={id:string;gameId:string;kind:'confirmed'|'account-selected';serverVersion:number;operations:QueuedOperation[];recovery?:{base:ConfirmedSnapshot|null;projection:GameView|null;reservedEntryIds:string[];beforeDelete?:GameView};selected?:ConfirmedSnapshot|{deleted:true;version:number}};
 export type GameOutbox={schemaVersion:2;profileId:string;games:QueuedGame[];archive:ArchivedBatch[]};
 export type ConflictReview={revision:number;gameId:string;rejected:OperationAcknowledgement;device:GameView|null;account:ConfirmedSnapshot|{deleted:true;version:number};dependentCount:number};
 export type OutboxAccess={readConfirmed:(gameId:string)=>Promise<ConfirmedSnapshot|null>;authorize:(mode:'read'|'write'|'sync')=>Promise<{profileId:string;guard:DocumentGuard}>};
@@ -89,18 +89,21 @@ async function project(op:GameOperation,prior:GameView|null,at:string):Promise<G
 }
 function serverVersion(value:number){if(!Number.isSafeInteger(value)||value<1||value>Number.MAX_SAFE_INTEGER)throw Error()}
 async function validateGame(g:QueuedGame,profileId:string,ids:Set<string>){
- id(g.gameId);if(!Array.isArray(g.reservedEntryIds))throw Error();const reserved=new Set(g.reservedEntryIds);if(reserved.size!==g.reservedEntryIds.length)throw Error();for(const entry of reserved)id(entry);for(const entry of [...(g.base?.view.game.entries??[]),...(g.projection?.game.entries??[]),...(g.candidate?.view.game.entries??[])])if(!reserved.has(entry.id))throw Error();if(g.base!==null)checkStored(g.base,profileId,g.gameId);
+ id(g.gameId);if(!Array.isArray(g.reservedEntryIds))throw Error();const reserved=new Set(g.reservedEntryIds);if(reserved.size!==g.reservedEntryIds.length)throw Error();for(const entry of reserved)id(entry);for(const entry of [...(g.base?.view.game.entries??[]),...(g.projection?.game.entries??[]),...(g.candidate?.view.game.entries??[]),...(g.beforeDelete?.game.entries??[])])if(!reserved.has(entry.id))throw Error();if(g.base!==null)checkStored(g.base,profileId,g.gameId);
  if(g.candidate!==undefined)checkStored(g.candidate,profileId,g.gameId);
  if(g.tombstone!==undefined){serverVersion(g.tombstone.version);if(g.base!==null||g.projection!==null||g.operations.length||g.candidate!==undefined)throw Error()}
+ if(g.beforeDelete!==undefined){const copy=snapshot(profileId,g.beforeDelete);if(copy.gameId!==g.gameId||g.beforeDelete.game.finished||g.tombstone&&copy.serverVersion!==g.tombstone.version-1)throw Error()}
  if(g.projection!==null&&snapshot(profileId,g.projection).gameId!==g.gameId)throw Error();if(!Array.isArray(g.operations))throw Error();
  let v=g.base?.serverVersion??0,stopped=false;let projection=g.base?.view??null;
  for(const item of g.operations){const op=operationFromWire(item.wire);if(op.kind==='action'&&op.command.action==='score'&&!reserved.has(op.command.entryId)||op.kind==='import'&&op.game.entries.some(e=>!reserved.has(e.id)))throw Error();if(op.gameId!==g.gameId||expected(op)!==v||ids.has(op.operationId)||!['queued','uncertain','applied','rejected'].includes(item.status))throw Error();ids.add(op.operationId);
   if(item.status==='applied'||item.status==='rejected'){if(stopped)throw Error();const ack=validateAck(op,item.acknowledgement);if(ack.outcome!==item.status)throw Error();if(item.status==='rejected')stopped=true}
   else {if(item.acknowledgement!==undefined||item.status==='uncertain'&&stopped)throw Error();stopped=true}
+  if(op.kind==='delete'&&g.beforeDelete&&canonical(g.beforeDelete)!==canonical(projection))throw Error();
   projection=await project(op,projection,item.localTime);v++;
  }
  if(canonical(projection)!==canonical(g.projection))throw Error();
  if(!g.operations.length&&!g.tombstone&&(!g.base||canonical(g.projection)!==canonical(g.base.view)))throw Error();
+ if(g.beforeDelete&&!g.tombstone&&(!g.operations.length||operationFromWire(g.operations.at(-1)!.wire).kind!=='delete'))throw Error();
  const last=g.operations.at(-1);if(last){const op=operationFromWire(last.wire);if(op.kind==='delete'?g.projection!==null:!g.projection||g.projection.game.version!==v)throw Error()}
 }
 async function decode(value:unknown,profileId:string,serialized?:string):Promise<GameOutbox>{
@@ -255,8 +258,8 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    const game=ctx.state.games.find(g=>g.gameId===gameId),review=game?reviewOf(game,ctx.revision):null;
    if(!game||!review||game.operations.some(i=>i.status==='uncertain'))throw new OutboxError('NEEDS_REVIEW','Resolve uncertain outcomes and refresh the account snapshot before choosing.');
    const v='deleted'in review.account?review.account.version:review.account.serverVersion;
-   ctx.state.archive.push({id:resolutionId,gameId,kind:'account-selected',serverVersion:v,operations:game.operations,recovery:{base:game.base,projection:game.projection,reservedEntryIds:[...game.reservedEntryIds]},selected:review.account});
-   game.operations=[];delete game.candidate;
+   ctx.state.archive.push({id:resolutionId,gameId,kind:'account-selected',serverVersion:v,operations:game.operations,recovery:{base:game.base,projection:game.projection,reservedEntryIds:[...game.reservedEntryIds],...(game.beforeDelete?{beforeDelete:game.beforeDelete}:{})},selected:review.account});
+   game.operations=[];delete game.candidate;delete game.beforeDelete;
    if('deleted'in review.account){game.base=null;game.projection=null;game.tombstone={version:v}}
    else{game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...review.account.view.game.entries.map(e=>e.id)])];game.base=review.account;game.projection=review.account.view}
    const guard=await collisionGuard(ctx.auth,gameId);await save(ctx,[guard,...guards]);
@@ -270,7 +273,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    const retained=ctx.state.archive.flatMap(b=>b.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
    if(retained){if(retained.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID already has a different immutable request.');if(retained.status!=='applied')throw new OutboxError('NEEDS_REVIEW','This request was retained during conflict review and will not be resubmitted automatically.');return}
    let game=ctx.state.games.find(g=>g.gameId===op.gameId);
-   if(scoringOnly&&(op.kind!=='action'||!['score','select','finish','resume','undo','edit','rules'].includes(op.command.action)||!game||!game.projection||game.tombstone||(game.projection.game.finished?!['resume','undo','edit'].includes(op.command.action):op.command.action==='resume')||game.operations.some(i=>i.status!=='queued')))throw new OutboxError('NEEDS_REVIEW','This game is not ready for offline score entry. Saved changes have been kept.');
+   if(scoringOnly&&(!game||!game.projection||game.tombstone||game.operations.some(i=>i.status!=='queued')||(op.kind==='delete'?game.projection.game.finished:op.kind!=='action'||!['score','select','finish','resume','undo','edit','rules'].includes(op.command.action)||(game.projection.game.finished?!['resume','undo','edit'].includes(op.command.action):op.command.action==='resume'))))throw new OutboxError('NEEDS_REVIEW','This game is not ready for this change. Saved changes have been kept.');
    if(!game){if(expected(op)!==0)throw new OutboxError('NEEDS_REVIEW','A confirmed base is required before scoring.');game={gameId:op.gameId,base:null,projection:null,operations:[],reservedEntryIds:[]};ctx.state.games.push(game)}
    if(contentMismatch(game))throw new OutboxError('NEEDS_REVIEW','Receipt and account content disagree. Reconcile before adding changes.');
    if(game.tombstone)throw new OutboxError('NEEDS_REVIEW','This game was deleted. Its original ID cannot be reused.');
@@ -282,6 +285,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
     if(game.reservedEntryIds.includes(entryId)||ctx.state.archive.some(b=>b.gameId===op.gameId&&b.operations.some(i=>{const prior=operationFromWire(i.wire);return prior.kind==='action'&&prior.command.action==='score'&&prior.command.entryId===entryId||prior.kind==='import'&&prior.game.entries.some(e=>e.id===entryId)}))||game.base?.view.game.entries.some(e=>e.id===entryId)||game.operations.some(i=>{const prior=operationFromWire(i.wire);return prior.kind==='action'&&prior.command.action==='score'&&prior.command.entryId===entryId||(prior.kind==='import'&&prior.game.entries.some(e=>e.id===entryId))}))throw invalid();
    }
    if(op.kind==='action'&&op.command.action==='score')game.reservedEntryIds.push(op.command.entryId);if(op.kind==='import')game.reservedEntryIds.push(...op.game.entries.map(e=>e.id));
+   if(op.kind==='delete'&&game.projection)game.beforeDelete=JSON.parse(JSON.stringify(game.projection)) as GameView;
    const localTime=new Date().toISOString();game.projection=await project(op,game.projection,localTime);if(game.projection)snapshot(ctx.auth.profileId,game.projection);
    game.operations.push({wire,status:'queued',localTime});await save(ctx,[guard]);
   },
