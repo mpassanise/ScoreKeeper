@@ -189,6 +189,8 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
  }
  return {
   async read(){return (await read()).state},
+  async scoringRead(gameId:string){const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);return {read:game?gameRead(game):null,eligible:!!game&&!!game.projection&&!game.tombstone&&!game.projection.game.finished&&game.operations.every(op=>op.status==='queued')&&!contentMismatch(game)}},
+  async hasOperation(input:GameOperation){const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read();const item=[...ctx.state.games.flatMap(g=>g.operations),...ctx.state.archive.flatMap(b=>b.operations)].find(i=>operationFromWire(i.wire).operationId===op.operationId);if(item&&item.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID has a different retained request.');return !!item},
   async readHomeState(){const ctx=await read();return {state:ctx.state,revision:ctx.revision||undefined}},
   async prepareCollisionResolution(gameId:string,input:ConfirmedSnapshot,reservedEntries:readonly string[]=[]){
    const selected=checkStored(input,input.profileId,gameId),ctx=await read('sync');id(gameId);
@@ -255,7 +257,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    else{game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...review.account.view.game.entries.map(e=>e.id)])];game.base=review.account;game.projection=review.account.view}
    const guard=await collisionGuard(ctx.auth,gameId);await save(ctx,[guard,...guards]);
   },
-  async enqueue(input:GameOperation){
+  async enqueue(input:GameOperation,scoringOnly=false){
    // Freeze the exact request before any await; caller changes cannot alter retries.
    const wire=JSON.stringify(input),op=operationFromWire(wire),ctx=await read('write'),guard=await collisionGuard(ctx.auth,op.gameId);
    const duplicate=ctx.state.games.flatMap(g=>g.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
@@ -264,6 +266,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    const retained=ctx.state.archive.flatMap(b=>b.operations).find(i=>operationFromWire(i.wire).operationId===op.operationId);
    if(retained){if(retained.wire!==wire)throw new OutboxError('OPERATION_ID_REUSED','This operation ID already has a different immutable request.');if(retained.status!=='applied')throw new OutboxError('NEEDS_REVIEW','This request was retained during conflict review and will not be resubmitted automatically.');return}
    let game=ctx.state.games.find(g=>g.gameId===op.gameId);
+   if(scoringOnly&&(op.kind!=='action'||!['score','select'].includes(op.command.action)||!game||!game.projection||game.tombstone||game.projection.game.finished||game.operations.some(i=>i.status!=='queued')))throw new OutboxError('NEEDS_REVIEW','This game is not ready for offline score entry. Saved changes have been kept.');
    if(!game){if(expected(op)!==0)throw new OutboxError('NEEDS_REVIEW','A confirmed base is required before scoring.');game={gameId:op.gameId,base:null,projection:null,operations:[],reservedEntryIds:[]};ctx.state.games.push(game)}
    if(contentMismatch(game))throw new OutboxError('NEEDS_REVIEW','Receipt and account content disagree. Reconcile before adding changes.');
    if(game.tombstone)throw new OutboxError('NEEDS_REVIEW','This game was deleted. Its original ID cannot be reused.');

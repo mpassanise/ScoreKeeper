@@ -25,9 +25,14 @@ export async function openGameScreen(pilot:RepositoryPilot,scope:ReadScope|null,
  return observeGameScreen(pilot,scope,gameId,await fetchGame());
 }
 export function gameScreenMessage(read:AccountGameRead|null):{title:string;detail:string}{
+ if(read?.kind==='game'&&read.canScore)return {title:read.sync==='pending'?'Scores saved on this device':'Ready to keep score',detail:'Scores save here first. Use Sync now to send them to your account. Game settings and history are view only.'};
+ if(read?.kind==='game'&&read.scoreAccess==='connect')return {title:'Saved copy · view only',detail:'Reconnect to verify account scoring support before entering scores. Your saved games and device games remain available.'};
+ if(read?.kind==='game'&&read.scoreAccess==='untracked')return {title:'Saved copy · view only',detail:'This game has not been prepared for offline score entry. Its saved copy is kept here.'};
+ if(read?.kind==='game'&&read.scoreAccess==='paused'&&read.sync==='pending')return {title:'Save confirmation pending',detail:'Reconnect to check the last save before entering more scores. Existing changes stay on this device.'};
  if(read?.kind==='deleted')return {title:'Game deleted',detail:'The confirmed deletion is saved on this device.'};
  if(read?.kind==='pending-delete')return {title:read.sync==='needs-review'?'Deletion needs review':'Deletion pending',detail:'This game stays hidden while its account deletion is unresolved. Your saved changes have been kept.'};
  if(read?.kind==='game'&&read.sync==='needs-review')return {title:'Saved changes need review',detail:'Your device changes have been kept. Account-game editing is paused while these differences are unresolved.'};
+ if(read?.kind==='game'&&read.scoreAccess==='paused')return {title:'Score entry paused',detail:'Reconnect to load the latest saved state before entering scores. Your input has been kept.'};
  if(read?.kind==='game'&&read.sync==='pending')return {title:'Changes saved on this device',detail:'Account confirmation is pending. You can review these scores while reconnecting.'};
  return {title:'Saved copy · view only',detail:'You can review this account game. Start a new game to keep score on this device.'};
 }
