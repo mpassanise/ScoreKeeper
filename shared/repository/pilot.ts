@@ -1,4 +1,4 @@
-import type {AccountStatus,GameView} from '../api';
+import type {AccountStatus,GameView,GameSummary} from '../api';
 import {AccountAccessError} from './account-access';
 import type {ConfirmedGames} from './confirmed-games';
 import type {GameRecoveryReview} from './game-recovery';
@@ -48,6 +48,14 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
    try{
     if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
     const value=await access.readGame(lease,gameId);valid(scope);return value;
+   }catch(error){invalidate(scope,error);throw error}
+  })},
+  readHome(scope:ReadScope|null,seeds:GameSummary[]){const detached=JSON.parse(JSON.stringify(seeds)) as GameSummary[];return serial(async()=>{
+   if(!options.enabled||!options.recoveryEnabled)return null;if(!scope)throw stale();valid(scope);
+   const {access}=await repository();valid(scope);
+   try{
+    if(!lease){const restored=await access.restore(scope.selector);valid(scope);if(!restored)throw new AccountAccessError('ACCOUNT_UNVERIFIED');lease=restored;proof=restored}
+    const result=await access.readHome(lease,detached);valid(scope);return result;
    }catch(error){invalidate(scope,error);throw error}
   })},
   readRecovery(scope:ReadScope|null,gameId:string,resolutionId:string){return serial(async()=>{
