@@ -135,7 +135,7 @@ function scoringContent(view:GameView){
   roundLimit:g.roundLimit??null,targetScore:g.targetScore??null,presetId:g.presetId??null,presetVersion:g.presetVersion??null,finishReason:g.finishReason??null});
 }
 function contentMismatch(game:QueuedGame){const last=game.operations.at(-1);return !!(last&&game.operations.every(i=>i.status==='applied')&&game.candidate&&game.candidate.serverVersion===last.acknowledgement!.committedVersion&&(!game.projection||scoringContent(game.candidate.view)!==scoringContent(game.projection)))}
-function gameRead(game:QueuedGame):AccountGameRead{
+export function gameRead(game:QueuedGame):AccountGameRead{
  if(game.tombstone)return {kind:'deleted',serverVersion:game.tombstone.version};
  const review=game.operations.some(i=>i.status==='rejected')||contentMismatch(game);
  const pendingOperations=game.operations.length,serverVersion=game.base?.serverVersion??null;
@@ -187,6 +187,7 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
  }
  return {
   async read(){return (await read()).state},
+  async readHomeState(){const ctx=await read();return {state:ctx.state,revision:ctx.revision||undefined}},
   async assertDelivery(gameId:string){const auth=await access.authorize('sync');await collisionGuard(auth,gameId);await access.authorize('sync')},
   /** Null means untracked, not deleted. Never replace a tracked result with cache data. */
   async readGame(gameId:string):Promise<AccountGameRead|null>{

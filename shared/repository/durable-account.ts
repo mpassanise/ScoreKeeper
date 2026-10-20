@@ -1,4 +1,5 @@
-import type {AccountStatus,GameView} from '../api';
+import {queueHome,homeResult,retainHomeSummaries} from './game-home';
+import type {AccountStatus,GameView,GameSummary} from '../api';
 import {AccountAccessError} from './account-access';
 import {LocalRepositoryError,snapshot,type ConfirmedGames} from './confirmed-games';
 import type {AccountGameRead} from './game-read-model';
@@ -77,6 +78,16 @@ export function createDurableAccountRepository(repository:ConfirmedGames){
    // A writer may have started tracking while the generic cache read was pending.
    const latest=await outbox.readGame(gameId);await current(proof);if(latest)return withReview(proof,gameId,latest);
    return withReview(proof,gameId,cached?{kind:'game',source:'cache',sync:'confirmed',view:cached.view,pendingOperations:0,serverVersion:cached.serverVersion}:{kind:'missing'});
+  },
+  async readHome(proof:DurableLease,seeds:GameSummary[]){
+   account(proof);await current(proof);
+   const index=await retainHomeSummaries(documents,proof.profileId,seeds,{key:KEY,revision:proof.revision});
+   await current(proof);const saved=await api.outbox(proof).readHomeState(),rows=queueHome(saved.state,index);
+   // Bound concurrent document reads. Never reread/decode the queue per tile.
+   for(let i=0;i<rows.length;i+=16)await Promise.all(rows.slice(i,i+16).map(async row=>{
+    if(await readGameCollision(documents,proof.profileId,row.gameId))row.sync='needs-review';
+   }));
+   await current(proof);if((await documents.read('game-outbox:'+proof.profileId))?.revision!==saved.revision)throw new LocalRepositoryError('STORAGE_CONFLICT','Saved changes updated. Reconnect to refresh the list.');await current(proof);return homeResult(rows);
   },
   async readRecovery(proof:DurableLease,gameId:string){
    account(proof);await current(proof);const saved=await api.outbox(proof).readRecovery(gameId),collision=await readGameCollision(documents,proof.profileId,gameId);
