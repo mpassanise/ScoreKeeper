@@ -12,7 +12,7 @@ export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
 /** Gated account repository pilot. Manual delivery is separately disabled;
  * score admission has its own flag; no automatic adoption/replay is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;adoptionEnabled?:boolean;admissionEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;scoringEnabled?:boolean;coldWritesEnabled?:boolean;adoptionEnabled?:boolean;admissionEnabled?:boolean;collisionResolutionEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
@@ -33,7 +33,7 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   if(code==='STALE_ACCOUNT'||code==='PROFILE_MISMATCH'||code==='ACCOUNT_DELETING')invalidateScope(scope);
  }
  function serial<T>(work:()=>Promise<T>):Promise<T>{const result=tail.then(work);tail=result.catch(()=>{});return result}
- async function repository(){if(closed||!options.enabled)throw stale();return opening??=(options.open().then(async raw=>{if(closed){await raw.close();throw stale()}return {raw,access:createDurableAccountRepository(raw)}}).catch(e=>{opening=undefined;throw e}))}
+ async function repository(){if(closed||!options.enabled)throw stale();return opening??=(options.open().then(async raw=>{if(closed){await raw.close();throw stale()}return {raw,access:createDurableAccountRepository(raw,{coldWritesEnabled:options.scoringEnabled===true&&options.coldWritesEnabled===true})}}).catch(e=>{opening=undefined;throw e}))}
  function valid(scope:ReadScope){if(closed||!options.enabled||!scopes.has(scope)||selector!==scope.selector||generation!==scope.generation)throw stale()}
  function capture():ReadScope|null{if(!options.enabled||closed||!selector)return null;const scope=Object.freeze({selector,generation});scopes.add(scope);return scope}
  function select(next:string|null){if(!options.enabled||closed||selector===next)return;stopDelivery();generation++;selector=next;lease=undefined;proof=undefined;deletionSelector=null}
@@ -134,7 +134,8 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   },
   recheck(){return serial(async()=>{if(!options.enabled||!selector||!lease||closed)return;const scope=capture()!,previous=lease,{access}=await repository();valid(scope);let restored:DurableLease|null;try{restored=await access.restore(scope.selector)}catch(error){invalidate(scope,error);throw error}valid(scope);
    if(!restored||restored.profileId!==previous.profileId){stopDelivery();generation++;lease=undefined;proof=undefined;options.onInvalidated();return}
-   // An external re-verification revokes writable permission until our next API verification.
+   // External lifecycle changes replace local grants with the committed rights.
+   // Network/import permission still requires our own fresh verification.
    if(restored.revision!==previous.revision){stopDelivery();generation++;lease=restored;proof=restored}
   })},
   signOut(){stopDelivery();const oldSelector=selector,oldProof=proof;if(oldSelector&&signOutIntent?.selector!==oldSelector)signOutIntent={selector:oldSelector,proof:oldProof};generation++;lease=undefined;proof=undefined;return serial(async()=>{if(!options.enabled||!oldSelector)return;const intent=signOutIntent;if(!intent||intent.selector!==oldSelector)return;const {access}=await repository();const restored=await access.restore(oldSelector);const candidate=restored??intent.proof;
