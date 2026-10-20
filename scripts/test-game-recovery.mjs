@@ -2,17 +2,19 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,writeFileSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createRequire} from 'node:module';
 import {IDBFactory} from '../tests/offline/node_modules/fake-indexeddb/build/esm/index.js';
 const root=mkdtempSync(path.join(tmpdir(),'scorekeeper-recovery-'));
 try{
- execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/repository/pilot.ts','shared/repository/indexeddb-confirmed-games.ts','shared/repository/sqlite-confirmed-games.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--strict','--skipLibCheck','--outDir',root],{stdio:'inherit'});
+ execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/repository/pilot.ts','shared/repository/game-screen.ts','shared/repository/indexeddb-confirmed-games.ts','shared/repository/sqlite-confirmed-games.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--strict','--skipLibCheck','--outDir',root],{stdio:'inherit'});
  writeFileSync(path.join(root,'package.json'),'{"type":"commonjs"}');const require=createRequire(import.meta.url);
  const {createDurableAccountRepository}=require(path.join(root,'repository/durable-account.js')),{createRepositoryPilot}=require(path.join(root,'repository/pilot.js'));
  const {openConfirmedGames}=require(path.join(root,'repository/indexeddb-confirmed-games.js')),{openSQLiteConfirmedGames}=require(path.join(root,'repository/sqlite-confirmed-games.js'));
+ const {keepRecoveryReview}=require(path.join(root,'repository/game-recovery.js'));
+ const {gameScreenMessage}=require(path.join(root,'repository/game-screen.js'));
  const {gameView}=require(path.join(root,'local-games.js')),{snapshot}=require(path.join(root,'repository/confirmed-games.js')),{keepGameCollision}=require(path.join(root,'repository/game-collisions.js'));
  const status={profileId:'A',deletionStatus:null,deletionEnabled:true},cap={version:1,receipts:'retained',atomicGameAndReceipt:true,kinds:['action'],actions:['score']};
  const rejects=(fn,code)=>assert.rejects(fn,e=>e.code===code);
@@ -32,6 +34,49 @@ try{
    const before=await repo.documents.read('game-outbox:A');await access.close();return {game,account,before,op};
   }
   async function pilotFor(f){let raw;const pilot=createRepositoryPilot({enabled:true,recoveryEnabled:true,open:async()=>{raw=await open();return raw},onInvalidated:()=>{}});const scope=await pilot.prepare('selector-A');await pilot.verify(scope,status);return {pilot,scope,get raw(){return raw}}}
+  // Exercise the actual shell handlers with real persisted read models. This
+  // catches UI adoption regressions that repository-only tests cannot observe.
+  for(const kind of ['game','pending-delete','deleted','missing']){
+   const repo=await open(),access=createDurableAccountRepository(repo),lease=await access.verify(await access.beginVerification('selector-A','A'),status),out=access.outbox(lease);
+   const players=[{id:randomUUID(),name:'One'},{id:randomUUID(),name:'Two'}],game={id:randomUUID(),name:'Selected account game',players,winner:'high',entries:[],next:players[0].id,finished:false,version:1,updated:'2026-10-19T00:00:00Z'},old=gameView(game);
+   if(kind!=='missing')await access.observeGame(lease,old);
+   if(kind==='pending-delete'||kind==='deleted'){
+    await out.seedConfirmed(game.id);const op={protocolVersion:1,kind:'delete',operationId:randomUUID(),gameId:game.id,expectedVersion:1};await out.enqueue(op);
+    if(kind==='deleted'){await out.prepareDelivery(game.id,{...cap,kinds:['delete']});await out.acknowledge(op.operationId,{operationId:op.operationId,gameId:game.id,outcome:'applied',committedVersion:2,observedVersion:1,errorCode:null});await out.settle(game.id)}
+   }
+   const model=(await access.readRecovery(lease,game.id)).review;assert.equal(model.read.kind,kind);
+   const durableBefore=await repo.documents.read('game-outbox:A'),cacheBefore=await access.readConfirmed(lease,game.id);
+   for(const [file,native]of [['app/cloud/CloudHome.tsx',false],['mobile/App.tsx',true]]){
+    const source=readFileSync(file,'utf8'),start=source.indexOf(' async function reviewSavedCopies()'),end=source.indexOf(' async function chooseRecoveryCopy()',start);assert.ok(start>=0&&end>start);const handler=source.slice(start,end).trim();
+    for(const race of ['none','account','selection']){
+     let selected=old,read=null,recovery=null,notice='',writes=0;const local={...game,deviceOnly:true,turnCount:0},unrelated={...game,id:randomUUID(),turnCount:0},initial=[{...game,turnCount:0},local,unrelated];let games=initial;
+     const context={current:{view:old}},owner={current:native?3:'selector-A'},other={...old,game:{...game,id:randomUUID()}};
+     const deps={gameRecoveryPilot:true,view:old,pilot:{ref:{current:{capture:()=>({selector:'selector-A',generation:1}),readRecovery:async()=>{if(race==='account')owner.current=native?4:'selector-B';if(race==='selection')context.current.view=other;return model}}}},identity:owner,identityRevision:owner,canUseAccount:value=>value===owner.current,context,foregroundContext:context,run:async work=>work(),setAccountRead:value=>{writes++;read=value},setView:value=>{writes++;selected=value},setGames:update=>{writes++;games=update(games)},setNotice:value=>{writes++;notice=value},setRecovery:value=>{writes++;recovery=value},Crypto:{randomUUID},crypto:{randomUUID},gameScreenMessage};
+     await new Function(...Object.keys(deps),'return ('+handler+')')(...Object.values(deps))();
+     if(race!=='none'){assert.equal(writes,0,file+' must ignore a late review after '+race+' change');continue}
+     assert.equal(read.kind,kind);assert.equal(recovery.review,model,'evidence remains available');assert.equal(keepRecoveryReview(model,selected),true,'selection effect must preserve the newly opened review');assert.equal(keepRecoveryReview(model,other),false,'switching to a different game closes the old review');
+     if(kind==='game'){assert.deepEqual(selected,old);assert.equal(games,initial);assert.equal(keepRecoveryReview(model,null),false,'Home closes a live-game review')}
+     else{assert.equal(selected,null,file+' must clear the stale live view');assert.ok(notice);assert.equal(keepRecoveryReview(model,null),true,'non-live evidence stays inspectable');assert.deepEqual(games,kind==='missing'?initial:[local,unrelated]);}
+    }
+   }
+   assert.deepEqual(await repo.documents.read('game-outbox:A'),durableBefore);assert.deepEqual(await access.readConfirmed(lease,game.id),cacheBefore,'UI suppression must not erase a saved source');await access.close();
+  }
+  // Suppressing a rejected deletion must not disable its eligible account-copy
+  // choice. Exercise both actual handlers through the real recovery transaction.
+  for(const [file,native]of [['app/cloud/CloudHome.tsx',false],['mobile/App.tsx',true]]){
+   const repo=await open(),access=createDurableAccountRepository(repo),lease=await access.verify(await access.beginVerification('selector-A','A'),status),out=access.outbox(lease),players=[{id:randomUUID(),name:'One'},{id:randomUUID(),name:'Two'}];
+   const game={id:randomUUID(),name:'Rejected deletion',players,winner:'high',entries:[],next:players[0].id,finished:false,version:1,updated:'2026-10-19T00:00:00Z'},old=gameView(game),remote=gameView({...game,version:2});await access.observeGame(lease,old);await out.seedConfirmed(game.id);
+   const op={protocolVersion:1,kind:'delete',operationId:randomUUID(),gameId:game.id,expectedVersion:1};await out.enqueue(op);await out.prepareDelivery(game.id,{...cap,kinds:['delete']});await out.acknowledge(op.operationId,{operationId:op.operationId,gameId:game.id,outcome:'rejected',committedVersion:null,observedVersion:2,errorCode:'VERSION_CONFLICT'});await access.observeGame(lease,remote);
+   const saved=await access.readRecovery(lease,game.id),review=saved.review;assert.equal(review.read.kind,'pending-delete');assert.equal(review.canChooseAccount,true);
+   let selected=old,recovery=null,read=null,notice='',calls=0;const originalOwner=native?3:'selector-A',owner={current:originalOwner},context={current:{view:old}},other={...game,id:randomUUID(),turnCount:0};let games=[{...game,turnCount:0},other];const decisionId=randomUUID();
+   const deps={gameRecoveryPilot:true,view:old,recovery:null,pilot:{ref:{current:{capture:()=>({selector:'selector-A',generation:1}),readRecovery:async()=>review,chooseAccountRecovery:async(_scope,selectedReview)=>{calls++;assert.equal(selectedReview,review);return access.chooseAccountRecovery(lease,game.id,saved.revision,decisionId)}}}},identity:owner,identityRevision:owner,canUseAccount:value=>value===owner.current,context,foregroundContext:context,run:async work=>work(),setAccountRead:value=>read=value,setView:value=>{selected=value;context.current.view=value},setGames:update=>games=update(games),setNotice:value=>notice=value,setRecovery:value=>recovery=value,setBusy:()=>{},setError:()=>{},locked:{current:false},activity:{current:0},activityRevision:{current:0},Crypto:{randomUUID},crypto:{randomUUID},gameScreenMessage,keepRecoveryReview};
+   const source=readFileSync(file,'utf8');function handler(name){const start=source.indexOf(' async function '+name+'()'),end=source.indexOf('\n async function ',start+10);assert.ok(start>=0&&end>start);return new Function(...Object.keys(deps),'return ('+source.slice(start,end).trim()+')')(...Object.values(deps))}
+   await handler('reviewSavedCopies')();assert.equal(selected,null);assert.deepEqual(games,[other]);deps.recovery=recovery;assert.ok(keepRecoveryReview(review,null));
+   owner.current=native?4:'selector-B';await assert.rejects(()=>handler('chooseRecoveryCopy')(),/Game or account access changed/);assert.equal(calls,0);owner.current=originalOwner;
+   context.current.view=gameView(other);await assert.rejects(()=>handler('chooseRecoveryCopy')(),/Game or account access changed/);assert.equal(calls,0);context.current.view=null;
+   await handler('chooseRecoveryCopy')();assert.deepEqual(selected,remote);assert.equal(read.kind,'game');assert.equal(recovery,null);assert.equal(calls,1);assert.equal(games.filter(g=>g.id===game.id).length,1);assert.ok(games.some(g=>g.id===other.id));assert.ok(notice.includes('kept'));
+   const state=await out.read(),batch=state.archive.find(b=>b.id===decisionId);assert.deepEqual(batch.recovery.base.view,old);assert.equal(batch.operations[0].wire,JSON.stringify(op));assert.equal((await access.readRecovery(lease,game.id)).review.copies.find(c=>c.label==='Before device deletion').view.game.id,game.id);await access.close();
+  }
   // Preview is read-only; choosing retains original projection, exact wires,
   // receipts and dependants and installs only the reviewed account snapshot.
   const f=await fixture(),p=await pilotFor(f),review=await p.pilot.readRecovery(p.scope,f.game.id,randomUUID());

@@ -34,3 +34,8 @@ A retry uses the same private decision ID. A commit whose response was lost is r
 Manual acceptance remains open: keyboard/focus restoration and screen-reader reading order in web; VoiceOver, safe area, text scaling and long names on iPhone; both themes; offline cold preview followed by reconnect; account switching/sign-out/deletion during review/confirmation; large histories and many retained copies. No live request delivery or scoring writer is activated.
 
 Next integrate same-version review with writer/delivery gates and the captured-account manual coordinator, then home/recovery summaries, explicit collision-resolution/archive policy and remaining local privacy/erasure/retention/adoption/performance acceptance before any production activation.
+
+
+## Deletion adoption correction
+
+Opening recovery suppresses a stale selected live game when the read is pending-delete, deleted or missing, while preserving the open evidence dialog. Pending/confirmed deletion also hides its account home row; missing data keeps that row for Reconnect. Device-only and unrelated rows are retained. An eligible rejected-delete decision can restore the account snapshot and one home row from the non-live review, using the same private ticket and guarded archival transaction. Actual shell-handler regression cases run against both storage adapters, including late identity/selection results. General home overlays and hidden-game recovery navigation remain separate activation gates.

@@ -22,3 +22,8 @@ export function recoveryReview(gameId:string,read:AccountGameRead,state:GameOutb
  const message=collision?'Two account copies disagree at the same version. Both are kept; choosing a version is paused.':uncertain?'A save has an unknown outcome. Reconnect before choosing a version so scores cannot be submitted twice.':conflict&&'deleted'in conflict.account?'This game was deleted in your account. Your device copy is kept for recovery.':canChooseAccount?'Compare your saved copies. Choosing the account copy keeps the current device scores in recovery; it does not combine or upload them.':read.kind==='game'&&read.sync==='needs-review'?'Saved copies still need review. Reconnect to refresh account information; your device scores stay here.':'These are saved copies, not a live connection. Reconnect to check for account updates.';
  return {gameId,read,copies,canChooseAccount,message,dependentCount:conflict?.dependentCount??0};
 }
+
+/** Keep non-live evidence inspectable after suppressing its stale game screen. */
+export function keepRecoveryReview(review:GameRecoveryReview,view:GameView|null){
+ return view?view.game.id===review.gameId:review.read.kind!=='game';
+}
