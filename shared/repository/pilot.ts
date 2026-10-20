@@ -2,22 +2,27 @@ import type {AccountStatus,GameView} from '../api';
 import {AccountAccessError} from './account-access';
 import type {ConfirmedGames} from './confirmed-games';
 import type {GameRecoveryReview} from './game-recovery';
+import type {DeliveryState,DeliveryOptions} from './game-delivery';
+export type ManualDeliveryRequest={base:string;getToken:(account:Readonly<{selector:string;profileId:string}>,signal:AbortSignal)=>Promise<string>;signal?:AbortSignal;onState?:(state:Readonly<DeliveryState>)=>void;options?:Omit<DeliveryOptions,'enabled'|'onState'>};
 import {createDurableAccountRepository,type DurableLease,type VerificationTicket} from './durable-account';
 import {stageLegacyGames} from './legacy-staging';
 export type ReadScope=Readonly<{selector:string;generation:number}>;
 export type DeviceSaveReview={busy:boolean;message:string;onReview:()=>void};
-/** Gated account read pilot. Observations respect tracked queue state; no live
- * source writer, automatic adoption, delivery or offline scoring is activated. */
-export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
+/** Gated account repository pilot. Manual delivery is separately disabled;
+ * no live scoring writer or automatic adoption/replay is activated. */
+export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:boolean;deliveryEnabled?:boolean;open:()=>Promise<ConfirmedGames>;publish?:()=>void;onInvalidated:()=>void}){
  let generation=0,selector:string|null=null,closed=false,lease:DurableLease|undefined,proof:DurableLease|VerificationTicket|undefined;
  let opening:Promise<{raw:ConfirmedGames;access:ReturnType<typeof createDurableAccountRepository>}>|undefined;
  let deletionSelector:string|null=null,signOutIntent:{selector:string;proof?:DurableLease|VerificationTicket}|null=null;
  let tail:Promise<unknown>=Promise.resolve();
+ type ManualFlight={scope:ReadScope;base:string;controller:AbortController;worker?:ReturnType<ReturnType<typeof createDurableAccountRepository>['httpDelivery']>;promise:Promise<DeliveryState>};
+ let manual:ManualFlight|null=null;
+ function stopDelivery(){const prior=manual;if(prior){prior.controller.abort();prior.worker?.close();if(manual===prior)manual=null}}
  const scopes=new WeakSet<object>();
  const reviews=new WeakMap<object,{scope:ReadScope;lease:DurableLease;gameId:string;revision:number;resolutionId:string}>();
  const stale=()=>new AccountAccessError('STALE_ACCOUNT');
  function invalidateScope(scope:ReadScope){
-  if(scopes.has(scope)&&selector===scope.selector&&generation===scope.generation&&!closed){generation++;lease=undefined;proof=undefined;options.onInvalidated()}
+  if(scopes.has(scope)&&selector===scope.selector&&generation===scope.generation&&!closed){stopDelivery();generation++;lease=undefined;proof=undefined;options.onInvalidated()}
  }
  function invalidate(scope:ReadScope,error:unknown){
   const code=(error as {code?:string})?.code;
@@ -27,12 +32,12 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
  async function repository(){if(closed||!options.enabled)throw stale();return opening??=(options.open().then(async raw=>{if(closed){await raw.close();throw stale()}return {raw,access:createDurableAccountRepository(raw)}}).catch(e=>{opening=undefined;throw e}))}
  function valid(scope:ReadScope){if(closed||!options.enabled||!scopes.has(scope)||selector!==scope.selector||generation!==scope.generation)throw stale()}
  function capture():ReadScope|null{if(!options.enabled||closed||!selector)return null;const scope=Object.freeze({selector,generation});scopes.add(scope);return scope}
- function select(next:string|null){if(!options.enabled||closed||selector===next)return;generation++;selector=next;lease=undefined;proof=undefined;deletionSelector=null}
+ function select(next:string|null){if(!options.enabled||closed||selector===next)return;stopDelivery();generation++;selector=next;lease=undefined;proof=undefined;deletionSelector=null}
  return {
   enabled:options.enabled,select,capture,invalidate(scope:ReadScope|null){if(scope)invalidateScope(scope)},
-  prepare(next:string){select(next);generation++;const scope=capture();return serial(async()=>{if(!options.enabled)return null;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);proof=(await access.restore(next))??undefined;valid(scope);proof=proof??await access.beginVerification(next);valid(scope);lease=proof.kind==='account'?proof:undefined;return scope})},
+  prepare(next:string){select(next);stopDelivery();generation++;const scope=capture();return serial(async()=>{if(!options.enabled)return null;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);proof=(await access.restore(next))??undefined;valid(scope);proof=proof??await access.beginVerification(next);valid(scope);lease=proof.kind==='account'?proof:undefined;return scope})},
   verify(scope:ReadScope|null,status:AccountStatus){return serial(async()=>{if(!options.enabled)return;if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);
-   if(!proof)throw new AccountAccessError('ACCOUNT_UNVERIFIED');valid(scope);
+   if(!proof)throw new AccountAccessError('ACCOUNT_UNVERIFIED');valid(scope);stopDelivery();
    try{lease=await access.verify(proof,status)}catch(error){invalidate(scope,error);throw error}
    proof=lease;valid(scope);options.publish?.();
   })},
@@ -57,22 +62,40 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
   })},
   chooseAccountRecovery(scope:ReadScope|null,review:GameRecoveryReview){return serial(async()=>{
    if(!options.enabled||!options.recoveryEnabled||!scope)throw stale();valid(scope);
-   const ticket=reviews.get(review);if(!ticket||ticket.scope!==scope||ticket.lease!==lease)throw stale();
+   const ticket=reviews.get(review);if(!ticket||ticket.scope!==scope||ticket.lease!==lease)throw stale();stopDelivery();
    const {access}=await repository();valid(scope);
    try{const read=await access.chooseAccountRecovery(ticket.lease,ticket.gameId,ticket.revision,ticket.resolutionId);valid(scope);options.publish?.();return read}catch(error){invalidate(scope,error);throw error}
   })},
+  manualDeliver(scope:ReadScope|null,request:ManualDeliveryRequest):Promise<DeliveryState>{
+   if(!options.enabled||!options.deliveryEnabled)return Promise.resolve({phase:'disabled'});
+   try{if(!scope)throw stale();valid(scope)}catch(error){return Promise.reject(error)}
+   if(manual&&manual.scope.selector===scope.selector&&manual.scope.generation===scope.generation&&manual.base===request.base)return manual.promise;
+   stopDelivery();
+   const flight:ManualFlight={scope:scope!,base:request.base,controller:new AbortController(),promise:undefined!};
+   const abort=()=>{flight.controller.abort();flight.worker?.close()};
+   request.signal?.addEventListener('abort',abort,{once:true});if(request.signal?.aborted)abort();
+   function active(){valid(flight.scope);if(flight.controller.signal.aborted)throw Object.assign(new Error('Sync cancelled. Saved changes have been kept.'),{code:'REQUEST_CANCELLED'})}
+   // Only acquire a worker under the pilot lock. Network delivery runs outside
+   // it so cached reads, sign-out and account deletion never wait for a pass.
+   flight.promise=Promise.resolve().then(()=>serial(async()=>{
+    active();if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease,{access}=await repository();active();
+    const worker=access.httpDelivery(captured,request.base,async(account,signal)=>{active();const token=await request.getToken(account,signal);active();return token},{maxAttempts:2,stepTimeoutMs:30000,passTimeoutMs:60000,operationBudget:25,...request.options,enabled:true,onState:state=>{try{active();if(lease===captured)request.onState?.(state)}catch{/* Cancelled or stale presentation must not escape its account. */}}});
+    flight.worker=worker;active();return worker;
+   })).then(async worker=>{const result=await worker.connect();if(result.code==='STALE_ACCOUNT'||result.code==='PROFILE_MISMATCH')invalidate(flight.scope,{code:result.code});if(result.phase==='account-blocked')invalidate(flight.scope,{code:'ACCOUNT_DELETING'});return result}).catch(error=>{invalidate(flight.scope,error);throw error}).finally(()=>{flight.worker?.close();request.signal?.removeEventListener('abort',abort);if(manual===flight)manual=null});
+   manual=flight;return flight.promise;
+  },
   recheck(){return serial(async()=>{if(!options.enabled||!selector||!lease||closed)return;const scope=capture()!,previous=lease,{access}=await repository();valid(scope);let restored:DurableLease|null;try{restored=await access.restore(scope.selector)}catch(error){invalidate(scope,error);throw error}valid(scope);
-   if(!restored||restored.profileId!==previous.profileId){generation++;lease=undefined;proof=undefined;options.onInvalidated();return}
+   if(!restored||restored.profileId!==previous.profileId){stopDelivery();generation++;lease=undefined;proof=undefined;options.onInvalidated();return}
    // An external re-verification revokes writable permission until our next API verification.
-   if(restored.revision!==previous.revision){generation++;lease=restored;proof=restored}
+   if(restored.revision!==previous.revision){stopDelivery();generation++;lease=restored;proof=restored}
   })},
-  signOut(){const oldSelector=selector,oldProof=proof;if(oldSelector&&signOutIntent?.selector!==oldSelector)signOutIntent={selector:oldSelector,proof:oldProof};generation++;lease=undefined;proof=undefined;return serial(async()=>{if(!options.enabled||!oldSelector)return;const intent=signOutIntent;if(!intent||intent.selector!==oldSelector)return;const {access}=await repository();const restored=await access.restore(oldSelector);const candidate=restored??intent.proof;
+  signOut(){stopDelivery();const oldSelector=selector,oldProof=proof;if(oldSelector&&signOutIntent?.selector!==oldSelector)signOutIntent={selector:oldSelector,proof:oldProof};generation++;lease=undefined;proof=undefined;return serial(async()=>{if(!options.enabled||!oldSelector)return;const intent=signOutIntent;if(!intent||intent.selector!==oldSelector)return;const {access}=await repository();const restored=await access.restore(oldSelector);const candidate=restored??intent.proof;
    if(candidate){try{await access.signOut(candidate)}catch(error){if((error as {code?:string})?.code!=='STALE_ACCOUNT'||await access.restore(oldSelector))throw error}options.publish?.()}
    if(signOutIntent===intent)signOutIntent=null;if(selector===oldSelector)selector=null;
   })},
-  beginDeletion(verifiedProfileId?:string){const oldSelector=selector;generation++;lease=undefined;return serial(async()=>{if(!options.enabled)return;if(!oldSelector)throw stale();if(deletionSelector===oldSelector)return;const {access}=await repository();const candidate=await access.restore(oldSelector);if(!candidate){if(!verifiedProfileId||!await access.isDeletionBlocked(verifiedProfileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED')}else{if(verifiedProfileId&&candidate.profileId!==verifiedProfileId)throw new AccountAccessError('PROFILE_MISMATCH');await access.beginDeletion(candidate);}deletionSelector=oldSelector;proof=undefined;options.publish?.()})},
+  beginDeletion(verifiedProfileId?:string){stopDelivery();const oldSelector=selector;generation++;lease=undefined;return serial(async()=>{if(!options.enabled)return;if(!oldSelector)throw stale();if(deletionSelector===oldSelector)return;const {access}=await repository();const candidate=await access.restore(oldSelector);if(!candidate){if(!verifiedProfileId||!await access.isDeletionBlocked(verifiedProfileId))throw new AccountAccessError('ACCOUNT_UNVERIFIED')}else{if(verifiedProfileId&&candidate.profileId!==verifiedProfileId)throw new AccountAccessError('PROFILE_MISMATCH');await access.beginDeletion(candidate);}deletionSelector=oldSelector;proof=undefined;options.publish?.()})},
   stage(raw:string){return serial(async()=>{if(!options.enabled)throw stale();const {raw:repo}=await repository();const journal=await stageLegacyGames(repo.documents,'scorekeeper-v1',raw);return journal})},
-  async close(){closed=true;generation++;lease=undefined;proof=undefined;await tail;const opened=await opening?.catch(()=>undefined);await opened?.access.close()}
+  async close(){stopDelivery();closed=true;generation++;lease=undefined;proof=undefined;await tail;const opened=await opening?.catch(()=>undefined);await opened?.access.close()}
  };
 }
 export type RepositoryPilot=ReturnType<typeof createRepositoryPilot>;

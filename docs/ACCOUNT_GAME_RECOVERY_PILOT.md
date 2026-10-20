@@ -39,3 +39,6 @@ Next integrate same-version review with writer/delivery gates and the captured-a
 ## Deletion adoption correction
 
 Opening recovery suppresses a stale selected live game when the read is pending-delete, deleted or missing, while preserving the open evidence dialog. Pending/confirmed deletion also hides its account home row; missing data keeps that row for Reconnect. Device-only and unrelated rows are retained. An eligible rejected-delete decision can restore the account snapshot and one home row from the non-live review, using the same private ticket and guarded archival transaction. Actual shell-handler regression cases run against both storage adapters, including late identity/selection results. General home overlays and hidden-game recovery navigation remain separate activation gates.
+
+
+Continuation: [captured-account manual delivery pilot](MANUAL_GAME_DELIVERY_PILOT.md) adds a separate default-false application delivery flag. Ordinary account clients remain read-only; only explicit manual actions with every prerequisite pilot enabled can invoke the dedicated immutable-operation transport. Startup/foreground refreshes do not replay queues. Production settings remain disabled.

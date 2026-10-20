@@ -1,7 +1,7 @@
 # Offline-first scoring and resilient account sync
 
 Updated: 2026-10-19
-Status: Phase 3 increment 9 adds separately disabled saved-copy recovery for web/iPhone on top of read-only account screens. Production flags, replay and live queue writers remain disabled.
+Status: Phase 3 increment 10 adds separately disabled, captured-account manual queue delivery on web/iPhone. Production flags and live queue writers remain disabled.
 Scope: web and iPhone, including games and frequent players.
 Owner: Scorekeeper project. Keep this document as the durable implementation tracker.
 
@@ -295,3 +295,25 @@ An eligible rejected deletion can still choose the reviewed account snapshot aft
 Extended the shared recovery CI suite to run actual web/iPhone handler source against real IndexedDB and desktop SQLite read/recovery states, including pending/confirmed/missing/live adoption, evidence retention, local/unrelated home rows, late account/game switches, rejected-delete recovery with no selected live view, account-row restoration and archive preservation. These tests cover state adoption, not physical device/browser rendering.
 
 Post-implementation review: checked the complete PR and final correction diff for deletion suppression, retained review access, scope/lease/revision decision guards, original request/receipt preservation, retries and web/iPhone parity. No additional blocking issue found in the reviewed code. Existing production pilots remain disabled; browser/physical-iPhone acceptance and the documented delivery/home-overlay/privacy/retention gates stay open. No API/schema deployment or paid Expo build is required for this correction. Next remains collision-aware delivery gates and captured-account manual delivery.
+
+
+### Phase 3 continuation, increment 10 — captured-account manual delivery
+
+PR #73 is merged, including deletion-adoption and required final-review corrections. Added collision-aware queue/delivery gates and a separately disabled manual application bridge on both web and iPhone. Explicit Reconnect/Sync now/Account sync (and native pull-to-refresh) can deliver already-retained immutable operations through the captured-account coordinator after fresh account verification. Startup and foreground refreshes remain read-only. A manual intent waits for an existing read-only refresh and coalesces repeated gestures instead of being swallowed by that refresh.
+
+Each pass pins one token and verifies its profile before POSTs. App callbacks check the captured web auth selector or native profile/identity before and after acquiring that token. Pass acquisition uses the short pilot lock; HTTP work runs outside it so saved reads, local games, sign-out and deletion do not wait. Scope changes, re-verification, caller abort and closure cancel the worker; stale workers cannot close a later one. Time/pass/operation budgets bound retries, which retain original bytes and operation/entry identities. No legacy game-write fallback, source adoption or automatic scoring writer is activated.
+
+Known same-version collision evidence blocks seeding, new queue writes, prepare/send retries and compaction/recovery decisions, with absence guards in the queue transaction. A direct coordinator GET now persists both contradictory snapshots. Collisions pause one game while independent games continue; corrupt storage/identity/protocol errors still stop the pass. A receipt arriving from an already in-flight request is retained even if a collision appears; lost responses keep the exact uncertain request. No collision evidence is cleared by a later GET or successful connection.
+
+The existing connection popover/drawer shows bounded progress and separates confirmed queue work, waiting changes and review-required work. Progress is scoped to the connection generation and omits IDs, tokens and payloads. Known pending/confirmed deletions suppress stale GETs and selected/home views after delivery; cache absence is not deletion proof. The full queue-aware home/recovery index remains a later gate.
+
+New flags: `NEXT_PUBLIC_GAME_DELIVERY_PILOT` and `EXPO_PUBLIC_GAME_DELIVERY_PILOT`, both false/absent and requiring the existing cache, screen AND recovery flags. Keep every client/backend rollout flag disabled in production. No API/schema deployment or paid Expo build is required to merge. A controlled end-to-end environment additionally needs an operations-capable API advertising retained receipts and the native SQLite-capable development binary; no such environment/settings were activated here.
+
+New CI regression coverage uses real repository logic on IndexedDB and desktop SQLite with intercepted test HTTP only. It covers pinned credentials, immutable retry, coalescing/waiting intents, nonblocking cached reads/sign-out, cancellation/late responses, profile/capability/cold-restore gates, collision transaction races and in-flight receipt preservation. Actual web/iPhone connection-function tests verify explicit-versus-automatic delivery and deletion GET suppression. Existing queue/reconciliation/recovery/read/pilot/connection/API tests and both typechecks remain required. Browser/physical-iPhone, real authenticated HTTP, accessibility, large-history/memory and privacy/retention/erasure acceptance remain open.
+
+Next: queue-aware home/recovery summaries (including hidden/deleted-game review entry points), explicit same-version collision resolution/archive policy, then controlled scoring-writer/source-adoption integration and remaining privacy/retention/performance/device gates before any production activation. Never reset, rebase or drop uncertain requests to recover a connection.
+
+
+### Increment 10 final architecture review
+
+Reviewed the complete iteration diff after implementation. Confirmed the separation between ordinary read-only clients and the separately gated immutable-operation transport, verified profile/lifecycle/token guards, absence-guarded collision transitions, preservation of in-flight receipts and original uncertain request bytes, worker/intent ownership, nonblocking reads/sign-out and web/iPhone parity. The review tightened native ordering: lifecycle evidence is processed first, all account/profile/deletion checks complete, and only then can the explicit post-verification delivery callback run. A manual intent is not lost behind an already-running read-only refresh. Added regression checks for those boundaries and known-deletion GET suppression. No additional blocking issue found in the reviewed code; full CI remains required before merge. Physical/browser/auth-provider, home/recovery overlay and privacy/retention/performance gates remain open. All production flags remain disabled.

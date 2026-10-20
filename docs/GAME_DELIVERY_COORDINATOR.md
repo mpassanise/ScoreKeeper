@@ -31,3 +31,6 @@ Worker status contains only phase, stage, attempt, pending count and sanitized c
 PR #69 is merged. This increment now targets main and includes its merged review-decision ID reservation fix. No API/schema deployment or paid Expo build is needed. Keep ScorekeeperGameOperationsEnabled=false and all client pilot/write flags off. Merge does not activate the worker.
 
 Next: application integration behind disabled web/iPhone flags, queue-aware reads, compact reconnect/status UX and explicit conflict/recovery UI. Complete authenticated HTTP, retained-session privacy, archive/local-erasure/performance and real-browser/physical-iPhone gates before writer cutover. Retained sessions still restore read-only until fresh verification. A native pilot needs a SQLite-capable binary, but do not spend an EAS build before the pilot is ready.
+
+
+Continuation: [captured-account manual delivery pilot](MANUAL_GAME_DELIVERY_PILOT.md) adds a separate default-false application delivery flag. Ordinary account clients remain read-only; only explicit manual actions with every prerequisite pilot enabled can invoke the dedicated immutable-operation transport. Startup/foreground refreshes do not replay queues. Production settings remain disabled.
