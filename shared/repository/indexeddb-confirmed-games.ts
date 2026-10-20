@@ -1,4 +1,4 @@
-import {checkDocumentGuard,documentGuards,type DocumentGuard,documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
+import {documentWrites,type DocumentWrite,checkDocumentGuard,documentGuards,type DocumentGuard,documentRecord,documentValue,nextDocument,type DocumentRecord} from './documents';
 import {canonical,checkStored,LocalRepositoryError,requireIdentity,snapshot,type ConfirmedGames,type ConfirmedSnapshot} from './confirmed-games';
 import type {GameView} from '../api';
 
@@ -40,6 +40,15 @@ export async function openConfirmedGames(factory:IDBFactory,name='scorekeeper-re
  }
  return {
   documents:{
+   writeMany(writes:readonly DocumentWrite[],guards?:readonly DocumentGuard[]){
+    const copies=documentWrites(writes),checks=documentGuards(guards);
+    return transaction<DocumentRecord[]>('readwrite',(store,done,abort)=>{
+     const existing:unknown[]=new Array(copies.length);let remaining=copies.length+checks.length;
+     function finish(){if(--remaining)return;const results=copies.map((w,i)=>nextDocument(existing[i],w.expectedRevision,w.value));for(let i=0;i<copies.length;i++)store.put({key:copies[i].key,...results[i]});done(results)}
+     copies.forEach((w,i)=>{const request=store.get(w.key);request.onsuccess=()=>{try{existing[i]=request.result;finish()}catch(error){abort(error)}}});
+     for(const guard of checks){const request=store.get(guard.key);request.onsuccess=()=>{try{checkDocumentGuard(request.result,guard);finish()}catch(error){abort(error)}}}
+    },META);
+   },
    read(key:string){requireIdentity(key);return transaction<DocumentRecord|null>('readonly',(store,done,abort)=>{const request=store.get(key);request.onsuccess=()=>{try{done(request.result===undefined?null:documentRecord(request.result))}catch(error){abort(error)}}},META)},
    write(key:string,expectedRevision:number,value:unknown,guards?:readonly DocumentGuard[]){requireIdentity(key);const copy=documentValue(value),checks=documentGuards(guards);return transaction<DocumentRecord>('readwrite',(store,done,abort)=>{
     let remaining=checks.length+1,existing:unknown;

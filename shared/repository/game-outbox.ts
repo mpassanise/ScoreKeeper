@@ -4,7 +4,7 @@ import {LocalGames,gameView} from '../local-games';
 import {canonical,checkStored,LocalRepositoryError,snapshot,type ConfirmedSnapshot} from './confirmed-games';
 import type {AtomicDocuments,DocumentGuard} from './documents';
 import type {AccountGameRead} from './game-read-model';
-import {readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
+import {readCollisionFile,readGameCollision,keepGameCollision,gameCollisionKey} from './game-collisions';
 
 // One bounded read-model cache per open repository. Mutable queue/write paths
 // always decode independently; callers never receive references to this cache.
@@ -162,10 +162,12 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
   const state:GameOutbox=record?await decode(record.value,auth.profileId):{schemaVersion:2,profileId:auth.profileId,games:[],archive:[]};
   await access.authorize(mode);return {auth,key,mode,revision:record?.revision??0,state};
  }
- async function save(context:Awaited<ReturnType<typeof read>>,guards:readonly DocumentGuard[]=[]){await access.authorize(context.mode);const size=utf8Size(JSON.stringify(context.state)),reserve=context.state.games.reduce((n,g)=>n+g.operations.reduce((m,item)=>m+transitionReserve(item),0),0);if(context.state.archive.reduce((n,b)=>n+b.operations.length,0)>10000||context.state.archive.length>10000||context.state.games.length>50||context.state.games.reduce((n,g)=>n+g.operations.length,0)>500||size+reserve>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await decode(context.state,context.auth.profileId);await access.authorize(context.mode);await documents.write(context.key,context.revision,context.state,[context.auth.guard,...guards]);await access.authorize(context.mode)}
+ async function validateSave(state:GameOutbox){const size=utf8Size(JSON.stringify(state)),reserve=state.games.reduce((n,g)=>n+g.operations.reduce((m,item)=>m+transitionReserve(item),0),0);if(state.archive.reduce((n,b)=>n+b.operations.length,0)>10000||state.archive.length>10000||state.games.length>50||state.games.reduce((n,g)=>n+g.operations.length,0)>500||size+reserve>8_000_000)throw new OutboxError('QUEUE_FULL','Device queue is full. Connect and review changes before adding more.');await decode(state,state.profileId)}
+ async function save(context:Awaited<ReturnType<typeof read>>,guards:readonly DocumentGuard[]=[]){await access.authorize(context.mode);await validateSave(context.state);await access.authorize(context.mode);await documents.write(context.key,context.revision,context.state,[context.auth.guard,...guards]);await access.authorize(context.mode)}
  async function collisionGuard(auth:{profileId:string},gameId:string){
-  if(await readGameCollision(documents,auth.profileId,gameId))throw new OutboxError('NEEDS_REVIEW','Conflicting account copies require review. Saved changes have been kept.');
-  return {key:gameCollisionKey(auth.profileId,gameId),revision:0};
+  const saved=await readCollisionFile(documents,auth.profileId,gameId);
+  if(saved.file?.active)throw new OutboxError('NEEDS_REVIEW','Conflicting account copies require review. Saved changes have been kept.');
+  return {key:gameCollisionKey(auth.profileId,gameId),revision:saved.revision};
  }
  async function settle(ctx:Awaited<ReturnType<typeof read>>,game:QueuedGame){
   if(game.tombstone)return 'deleted' as const;
@@ -188,6 +190,20 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
  return {
   async read(){return (await read()).state},
   async readHomeState(){const ctx=await read();return {state:ctx.state,revision:ctx.revision||undefined}},
+  async prepareCollisionResolution(gameId:string,input:ConfirmedSnapshot,reservedEntries:readonly string[]=[]){
+   const selected=checkStored(input,input.profileId,gameId),ctx=await read('sync');id(gameId);
+   if(selected.profileId!==ctx.auth.profileId)throw new OutboxError('NEEDS_REVIEW','Account copy belongs to a different profile.');
+   let game=ctx.state.games.find(g=>g.gameId===gameId);
+   if(game&&(game.tombstone||game.operations.length))throw new OutboxError('NEEDS_REVIEW','Pending changes or deletion evidence must stay paused. Nothing has been replaced.');
+   const floor=Math.max(game?.base?.serverVersion??0,game?.candidate?.serverVersion??0);
+   if(selected.serverVersion<=floor)throw new OutboxError('NEEDS_REVIEW','A newer account copy is required. Existing copies have been kept.');
+   const prior=game?.base??(game?null:await access.readConfirmed(gameId));
+   if(prior&&selected.serverVersion<=prior.serverVersion)throw new OutboxError('NEEDS_REVIEW','A newer account copy than the saved base is required.');
+   if(!game){game={gameId,base:selected,projection:selected.view,operations:[],reservedEntryIds:[]};ctx.state.games.push(game)}
+   game.reservedEntryIds=[...new Set([...game.reservedEntryIds,...(prior?.view.game.entries??[]).map(e=>e.id),...reservedEntries,...selected.view.game.entries.map(e=>e.id)])];game.base=selected;game.projection=selected.view;delete game.candidate;
+   await validateSave(ctx.state);await access.authorize('sync');
+   return {write:{key:ctx.key,expectedRevision:ctx.revision,value:ctx.state},guard:ctx.auth.guard,prior};
+  },
   async assertDelivery(gameId:string){const auth=await access.authorize('sync');await collisionGuard(auth,gameId);await access.authorize('sync')},
   /** Null means untracked, not deleted. Never replace a tracked result with cache data. */
   async readGame(gameId:string):Promise<AccountGameRead|null>{
