@@ -88,7 +88,18 @@ jobs:
       - run: npm run typecheck
         working-directory: mobile
       - run: node scripts/test-swipe-game-row.mjs
-      - run: npx expo export --platform ios --output-dir /tmp/scorekeeper-mobile
+      - name: Load public production-profile values for native export
+        working-directory: mobile
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const values = JSON.parse(fs.readFileSync('eas.json', 'utf8')).build.production.env;
+          for (const [key, value] of Object.entries(values)) {
+            if (!/^EXPO_PUBLIC_[A-Z0-9_]+$/.test(key) || typeof value !== 'string' || /[\r\n]/.test(value)) throw new Error('Invalid public profile value');
+            fs.appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
+          }
+          NODE
+      - run: npx expo export --platform ios --clear --output-dir /tmp/scorekeeper-mobile
         working-directory: mobile
 
   browser-sync:

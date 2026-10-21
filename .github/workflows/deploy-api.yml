@@ -2,6 +2,12 @@ name: Deploy Azure API
 run-name: Deploy Scorekeeper API · ${{ github.actor }}
 on:
   workflow_dispatch:
+    inputs:
+      enable_game_operations:
+        description: Enable replay-safe offline game operations on the existing API after deployment
+        type: boolean
+        required: true
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -99,6 +105,17 @@ jobs:
           app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
           package: ${{ runner.temp }}/scorekeeper-api
           remote-build: false
+      - name: Enable replay-safe game operations when requested
+        if: ${{ inputs.enable_game_operations }}
+        shell: bash
+        run: |
+          az functionapp config appsettings set --subscription "$AZURE_SUBSCRIPTION_ID" --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_FUNCTIONAPP_NAME" --settings ScorekeeperGameOperationsEnabled=true --output none
+          configured=$(az functionapp config appsettings list --subscription "$AZURE_SUBSCRIPTION_ID" --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_FUNCTIONAPP_NAME" --query "[?name=='ScorekeeperGameOperationsEnabled'].value | [0]" --output tsv)
+          if [[ "$configured" != "true" ]]; then
+            echo "::error::Replay-safe operation setting could not be verified. Do not activate clients yet."
+            exit 1
+          fi
+          echo "Replay-safe operation setting verified. Authenticated schema/capability acceptance is still required."
       - name: Check deployed API authentication
         shell: bash
         env:
@@ -118,9 +135,15 @@ jobs:
         shell: bash
         env:
           API_HOST: ${{ steps.target.outputs.host }}
+          ENABLE_GAME_OPERATIONS: ${{ inputs.enable_game_operations }}
         run: |
           echo "## Azure API deployed" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "API: https://$API_HOST/api" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$ENABLE_GAME_OPERATIONS" == "true" ]]; then
+            echo "Replay-safe game operation setting was enabled and verified. Authenticated capability/schema checks remain required." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Replay-safe operation setting was left unchanged." >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "Release build and scoring/account tests passed. Deployment completed and the authentication smoke check returned HTTP 401 as expected. Database/authenticated scoring still needs an end-to-end check." >> "$GITHUB_STEP_SUMMARY"

@@ -1,94 +1,73 @@
-# Offline-first device pilot: preflight and first test session
+# Offline-first upgrade in place
 
-Status: prepared, not activated. PR #88 is merged; the next milestone is full-app browser/iPhone acceptance, not another delivery feature. No build or deployment is started by this document.
+Mike confirmed on 2026-10-20 that the current app is pre-production and authorized upgrading the current app/API in place. Use the existing account registration, API, database, bundle identifier and device stores. A separate test API, app variant or disposable account is not a prerequisite. PR #89 is merged; the earlier separate-target proposal is superseded by this decision.
 
-## 1. Choose the test target before spending an Expo build
+## 1. Deploy and enable the existing API first
 
-The checked-in `mobile/eas.json` development, preview and production profiles all target the existing API. None declares the seven automatic-sync flags below. This is a repository-only inspection: remote Expo environment variables, local .env files, hosting build variables and actual Azure settings have not been inspected and can change the effective configuration. A normal production build must not be assumed to exercise the pilot.
+After merging the in-place configuration PR, open GitHub Actions → **Deploy Azure API** → **Run workflow**, select `main`, and check **Enable replay-safe offline game operations on the existing API after deployment**. The workflow builds/tests/deploys the current API, then sets and verifies only `ScorekeeperGameOperationsEnabled=true` on the existing target. Leaving the checkbox unchecked preserves the existing setting; it does not turn an already enabled API off.
 
-Decide between a separate test API/database (preferred for failure/deletion testing) and an explicitly authorized pilot against the existing API using disposable test accounts/games. A dedicated account does not isolate server settings: enabling `ScorekeeperGameOperationsEnabled` on the existing Function App affects capability discovery for all accounts served there. Do not change that production setting merely to follow this document. Confirm the endpoint, accepted token audience/scope, web redirect/CORS and mobile registration with the chosen target before configuring clients.
+Migrations 004 and 005 were previously reported applied. Confirm that this remains the target database and current API schema is ready; do not reset it or rerun 004 after 005. Schema marker 2 and protocol capability version 1 are different values. See [lifecycle deployment requirements](GAME_LIFECYCLE_OPERATIONS.md). Deployment and the unauthenticated HTTP 401 smoke test do not prove authenticated database/capability acceptance.
 
-All current iPhone profiles also use the same application bundle identifier. A differently named EAS profile alone does not create a separate app or storage sandbox. Use a spare test device or a deliberately configured separate app variant. Do not uninstall the current app or clear its data to make a test work. Preserve existing local-only games and queued/recovery data.
+Sign in to the current account and inspect its authenticated `GET /api/account` response. Require a matching profile, `deletionStatus: null`, and `gameOperations.version: 1`, `receipts: "retained"`, `atomicGameAndReceipt: true`, `kinds` containing `action`, `delete`, and `import`, and the advertised actions used (`score`, `select`, `finish`, `resume`, `undo`, `edit`, `rules`). If capability is null or incompatible, stop cloud activation and inspect the deployed API/schema before building the client. Never work around uncertainty by changing operation/entry IDs or sending pending actions through legacy endpoints.
 
-## 2. Verify backend readiness in the chosen test environment
+This conversation cannot invoke the Azure deployment workflow through the available connector. The workflow must actually run; a merged PR is not evidence of deployment or a live Azure setting change.
 
-- Confirm all API instances run the lifecycle/receipt implementation and migrations 004 then 005 have already been applied to that database. Migration 005 advances the schema marker to 2; do not rerun 004 after 005. See [lifecycle deployment requirements](GAME_LIFECYCLE_OPERATIONS.md).
-- Only after test-target authorization, enable `ScorekeeperGameOperationsEnabled=true` there. Do not infer current Azure values from a merged PR or an earlier deployment.
-- Sign in with a disposable test account and inspect its authenticated `GET /api/account` response. Require a matching profile, `deletionStatus: null`, and `gameOperations.version: 1`, `receipts: "retained"`, `atomicGameAndReceipt: true`, `kinds` containing `action` and `delete`, and advertised actions for the test (`score`, `select`, plus `finish/resume/undo/edit/rules` when exercising those actions). Import tests additionally require `import`.
-- `gameOperations: null`, an auth error, wrong profile or missing capability is a stop condition before building/enabling a writer. Do not retry legacy mutations or replace unknown-outcome operation IDs.
-- Record API commit/version, migration state and a capability summary. Never share bearer/refresh tokens, connection strings or raw personal/game payloads in logs or PRs. Capability observation is not a substitute for native/device acceptance.
+## 2. Activate the current website
 
-## 3. Prepare explicit test-only client settings
+Use the current Sites project/origin and existing API. Set the web settings below in Sites and build/publish the latest merged source with those same public values available at bundle time. NEXT_PUBLIC flags are consumed by client code; a runtime configuration change alone is not proof they were compiled into the browser bundle. Do not publish an old saved version as though it contained the latest architecture.
 
-Both apps use the same suffixes with different prefixes:
+| Suffix | NEXT_PUBLIC_ on web / EXPO_PUBLIC_ on iPhone |
+|---|---|
+| CONFIRMED_CACHE_PILOT | true |
+| GAME_SCREEN_PILOT | true |
+| GAME_RECOVERY_PILOT | true |
+| GAME_DELIVERY_PILOT | true |
+| GAME_SCORING_PILOT | true |
+| GAME_COLD_WRITES_PILOT | true |
+| GAME_AUTOMATIC_SYNC_PILOT | true |
+| GAME_ADOPTION_REVIEW_PILOT | true |
+| GAME_ADOPTION_IMPORT_PILOT | true |
+| LEGACY_STAGING_PILOT | false |
+| GAME_COLLISION_RESOLUTION_PILOT | false |
 
-| Suffix | Web prefix | iPhone prefix | Automatic pilot test value |
-|---|---|---|---|
-| CONFIRMED_CACHE_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
-| GAME_SCREEN_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
-| GAME_RECOVERY_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
-| GAME_DELIVERY_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
-| GAME_SCORING_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
-| GAME_COLD_WRITES_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
-| GAME_AUTOMATIC_SYNC_PILOT | NEXT_PUBLIC_ | EXPO_PUBLIC_ | true |
+The first seven enable the core offline/automatic path. Review/import flags expose explicit account-copy admission of existing/new device-only games. Enabling them does not automatically import a game or replace an original. Legacy staging and advanced same-version collision resolution remain off; unresolved conflicts stay retained for review. A separate permanent production rollout decision is not needed for this authorized pre-production upgrade, but unverified acceptance results must still be recorded honestly.
 
-These are build/bundle settings, not an in-app switch. Leave production settings unchanged. Use an isolated web preview/origin and an explicit mobile test profile. Keep legacy staging, adoption review/import and collision-resolution flags false for the initial existing-account-game session; they have separate acceptance gates. A newly created device-only game is not proof of account-queue synchronization.
+Record the actual deployment/version and effective compiled flags. Do not clear browser data. Public identifiers/flags are not secrets; never put bearer/refresh tokens, connection strings or private keys in public variables.
 
-The following is a **proposed profile fragment**, not an existing profile or applied configuration. Add it under `build` only after the target and test installation are agreed. Replace the endpoint and verify inherited public auth identifiers/scope for that target. The `preview` environment is selected explicitly; inspect project/account EAS variables as well. Inheriting `preview` produces an internal Release build without a Metro server, so the installed bundle uses the build settings. Keep development/production profiles unchanged.
+## 3. Update the installed iPhone app without uninstalling
 
-```json
-"offline-acceptance": {
-  "extends": "preview",
-  "environment": "preview",
-  "env": {
-    "EXPO_PUBLIC_API_URL": "https://REPLACE-WITH-APPROVED-TEST-API/api",
-    "EXPO_PUBLIC_CONFIRMED_CACHE_PILOT": "true",
-    "EXPO_PUBLIC_GAME_SCREEN_PILOT": "true",
-    "EXPO_PUBLIC_GAME_RECOVERY_PILOT": "true",
-    "EXPO_PUBLIC_GAME_DELIVERY_PILOT": "true",
-    "EXPO_PUBLIC_GAME_SCORING_PILOT": "true",
-    "EXPO_PUBLIC_GAME_COLD_WRITES_PILOT": "true",
-    "EXPO_PUBLIC_GAME_AUTOMATIC_SYNC_PILOT": "true",
-    "EXPO_PUBLIC_LEGACY_STAGING_PILOT": "false",
-    "EXPO_PUBLIC_GAME_ADOPTION_REVIEW_PILOT": "false",
-    "EXPO_PUBLIC_GAME_ADOPTION_IMPORT_PILOT": "false",
-    "EXPO_PUBLIC_GAME_COLLISION_RESOLUTION_PILOT": "false"
-  }
-}
-```
+All existing EAS development, preview and production profiles now declare the table above and retain their API, public auth identifiers and application identity. The existing `production` profile remains the TestFlight/App Store build profile; using this profile name does not change the user's classification of the current app as pre-production. No new profile or bundle identifier is needed.
 
-Public identifiers are not secrets. Do not put secrets in NEXT_PUBLIC_/EXPO_PUBLIC_ settings. For a development-client build instead, configure the same test values in the Metro environment too: EAS build-profile env does not automatically populate a later local `expo start` process.
+Use a new binary including `expo-network` and `expo-sqlite`, with a cleared build/bundler cache so newly enabled public flags are not inherited from a stale transformed bundle. An iOS JavaScript export is not native linking acceptance, and these new module requirements must not be sent to an older binary as a JavaScript-only update. Upgrade the installed app through the existing distribution path; do not uninstall it first or erase AsyncStorage/SQLite to make testing pass.
 
-## 4. Build once, after preflight and explicit build authorization
-
-The new binary must include `expo-network` and `expo-sqlite`; an export is not proof of native linking. Never send the new module requirement to an old binary as a JavaScript-only update. Internal distribution is different from TestFlight; use the installation link for registered test devices. If choosing TestFlight instead, prepare its separate store-distribution profile deliberately rather than submitting this internal profile.
-
-From the repository root in PowerShell, **after the proposed profile has actually been configured**:
+After API readiness and website upgrade, from the repository root in PowerShell:
 
 ```powershell
 git pull --ff-only
 Set-Location mobile
 npm ci
 npm run typecheck
-npx eas-cli@latest build --platform ios --profile offline-acceptance
+npx eas-cli@latest build --platform ios --profile production --clear-cache
+npx eas-cli@latest submit --platform ios --profile production --latest
 ```
 
-The final command starts an EAS build and may consume paid allowance. It has not been run or authorized here. Install only on the agreed test device/variant, and record the commit, build ID, API endpoint and effective flags. Use the same client commit/test API for the isolated web preview.
+The final two commands start a potentially paid build and upload to App Store Connect. They have not been run here. Submit the just-completed build; use its explicit build ID instead of `--latest` if another build can finish concurrently. Install it from TestFlight after processing. Alternatively, manually run the existing **Build iPhone for TestFlight** workflow after API readiness. No build is triggered merely by merging these changes.
 
-## 5. First session: existing account game only
+For local development, copy/merge public values from `mobile/.env.example` into the ignored mobile environment without overwriting private/local settings, then restart Metro. EAS profile env does not automatically populate a later local `expo start` process. Do not replace existing local files wholesale.
 
-1. Online, sign in to the disposable account on web and iPhone. Open an existing unfinished account game with known player IDs/history. If none exists, seed a disposable account game through a compatible existing client before the pilot; do not enable import as an implicit workaround.
-2. While connected, open the game and choose **Enable score entry** if it is untracked. Preparing a cached game is explicit. Confirm a score is saved and then confirmed in the account on both clients; record starting game/version/entry counts.
-3. Put iPhone in airplane mode, force-close/reopen it, then resume the prepared game. Enter two different scores. It must remain usable with local saves and a clear pending/offline state. Do not create replacement games or sign out to work around a failed save.
-4. Restore networking while keeping the app foregrounded. No manual reconnect should be needed. An exhausted retry budget may wait the remaining one-minute cooldown. Confirm each score appears once on web with matching totals/history, and that no duplicate game tile appears.
-5. Background/foreground during a later sync and repeat a manual Reconnect. Confirm drafts remain and history is not duplicated. Stop if an error cannot be explained; preserve data and record sanitized stage/code/duration.
-6. With both clients caught up, disconnect one, score on both, then reconnect. Expect explicit conflict review rather than silent merging/rebasing. Inspect both retained histories before any account-copy choice. Verify choice retries retain the displaced device history.
-7. Delete only a disposable game and verify pending deletion, eventual suppression and retained before-delete evidence. Account deletion, old-client mixing, quotas, privacy/erasure and rollout rollback require the later dedicated matrix rows; do not test these against personal data.
+## 4. Preserve existing games and exercise the upgrade
 
-Record results in [the acceptance matrix](AUTOMATIC_SYNC_ACCEPTANCE.md). A successful session closes only its recorded rows, not all native/auth/performance/retention gates. Keep broader rollout disabled until those gates and policies are resolved.
+1. Online, sign in with the current account on web and iPhone. Open an existing unfinished account game and choose **Enable score entry** if it is untracked. Explicit preparation creates the authoritative tracked queue; a cached summary alone is not an offline game. Record starting version/history and confirm a score reaches both clients.
+2. Existing device-only games stay local until explicitly reviewed/imported. Review the actual source, choose account admission, and let the retained original request sync. The account copy then becomes the playable authority; originals remain retained as read-only recovery evidence. Do not manually recreate the game or delete its original as an import workaround.
+3. New games under the screen pilot are device-only initially. Use the same explicit review/import path when account sync is wanted. Starting a new local game alone is not evidence of account queue sync.
+4. Put iPhone in airplane mode, force-close/reopen, resume the prepared game and enter two scores. Local saving must remain usable. Restore networking while foregrounded; automatic delivery should resume without a tap, subject to the remaining one-minute exhausted-retry cooldown. Confirm original entries appear once on web and no duplicate playable game appears.
+5. Exercise background/foreground and manual Reconnect with a typed draft. Confirm the draft remains and history is not duplicated. With both clients initially caught up, disconnect one and score on both. Reconnect should retain both histories for explicit conflict review rather than silently rebase/merge.
+6. Use a throwaway game for deletion checks. Verify pending deletion, eventual suppression and before-delete history across restart. Account deletion/quota/privacy/erasure require their dedicated acceptance rows; do not erase real information as a test workaround.
+
+Record actual results, commit/build/version, API capability summary and sanitized diagnostic stage/code/duration in [the acceptance matrix](AUTOMATIC_SYNC_ACCEPTANCE.md). Real auth, native linking, mixed-client interruption, privacy/erasure and measured latency remain unverified until exercised; approval to upgrade does not manufacture test results.
 
 ## Stop and rollback
 
-Stop the pilot for lost/duplicate entries, account leakage, unexpected deletion, false save confirmation or storage/native failures. Preserve queues, receipts, tombstones, archives and originals. Disabling automatic scheduling must not return pending account games to a legacy writer. Retain local use with sync paused or reconcile/drain through the verified protocol; do not clear storage, uninstall, erase receipts or blindly downgrade a pending store. Agree any server-setting rollback for the chosen environment explicitly.
+Preserve queues, receipts, tombstones, archives and originals if any check fails. Pause automatic scheduling or cloud delivery without returning pending account games to legacy writers. Reconcile/drain through the verified protocol or retain local use with sync paused. Do not clear storage, uninstall, erase receipts or blindly downgrade a pending store. Explicit server-setting rollback is separate from deploying with the enable checkbox unchecked.
 
-References: [Expo build profiles](https://docs.expo.dev/build/eas-json/), [Expo public environment variables](https://docs.expo.dev/guides/environment-variables/), [the saved architecture plan](OFFLINE_FIRST_SYNC_PLAN.md).
+References: [Expo build profiles](https://docs.expo.dev/build/eas-json/), [Expo public environment variables](https://docs.expo.dev/guides/environment-variables/), [saved architecture plan](OFFLINE_FIRST_SYNC_PLAN.md).

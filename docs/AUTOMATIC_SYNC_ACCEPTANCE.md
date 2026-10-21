@@ -1,15 +1,15 @@
 # Automatic foreground sync acceptance
 
-Status: pending real-device acceptance; all rollout flags stay disabled.
+Status: pending real-device acceptance. Mike authorized upgrading the current pre-production app/API in place on 2026-10-20; activation status must be recorded separately from acceptance results.
 Baseline: PR #87 (automatic foreground sync plus native connectivity recovery). Automated tests are evidence for code behavior, not a substitute for this matrix.
 
-Use [the device pilot runbook](OFFLINE_PILOT_DEVICE_RUNBOOK.md) to choose the test target and check build settings before spending an EAS build. Its profile fragment is proposed, not applied.
+Use [the in-place upgrade runbook](OFFLINE_PILOT_DEVICE_RUNBOOK.md). The current API/database/app identity are the authorized target; no separate test environment is required. API deployment/capability readiness comes before website/native activation.
 
 ## Preconditions
 
-- Use a test account and isolated browser profiles/devices with recoverable game data. Record client commit/binary version, API version/capabilities and effective pilot flags for every run.
+- Use the current account/app and preserve existing data during upgrade; use throwaway games for destructive checks. Record client commit/binary version, API version/capabilities and effective flags for every run.
 - A new iPhone development/TestFlight binary must include `expo-network ~57.0.2` and existing SQLite dependencies. An iOS JavaScript export does not verify native linking. Do not send this code as a JS-only update to an older binary missing the module. No paid build is authorized by this checklist.
-- Apply rollout flags only in an explicitly authorized test environment. Keep production disabled. Automatic sync requires the existing repository/screen/recovery/delivery/scoring/cold-write pilot chain; imports have their own review/admission flags and fresh import capability.
+- Apply the authorized flags to the current pre-production app in place, after API readiness. Automatic sync requires the existing repository/screen/recovery/delivery/scoring/cold-write pilot chain; imports have their own review/admission flags and fresh import capability.
 - Preserve the initial game IDs, player/entry IDs, complete history and operation IDs/receipts before failure injection. Compare the retained device projection and server history afterwards, including when a request outcome is unknown. Never clear storage to make a failed run pass.
 
 ## Matrix to execute on web and iPhone
@@ -34,7 +34,7 @@ Record timestamps, visible sync state, sanitized diagnostic stage/code and durat
 
 ## Exit and rollout
 
-All rows need recorded results and resolved blocking defects/policies before activation. First authorize an isolated browser/device pilot; then stage web and TestFlight cohorts with explicit stop criteria for lost/duplicate history, account leakage, unexpected deletion, save failures or sustained latency. Disabling new scheduling must preserve queued data and account-copy authority; do not fall back to legacy mutation writers. Reconcile/drain or retain local use with sync paused. API/schema readiness must be checked against actual deployed capabilities, not inferred from merges. OS background execution and scale work remain separate.
+All rows need recorded results and resolved blocking defects/policies before activation. The current in-place pilot is authorized; use explicit stop criteria for lost/duplicate history, account leakage, unexpected deletion, save failures or sustained latency. Disabling new scheduling must preserve queued data and account-copy authority; do not fall back to legacy mutation writers. Reconcile/drain or retain local use with sync paused. API/schema readiness must be checked against actual deployed capabilities, not inferred from merges. OS background execution and scale work remain separate.
 
 
 ## Automated browser repository evidence
@@ -43,7 +43,7 @@ A dedicated `browser-sync` CI job runs `node scripts/test-browser-sync.mjs` with
 
 Passed in GitHub Actions run [39496345284](https://github.com/mpassanise/ScoreKeeper/actions/runs/39496345284), browser-sync job 118882272929, on source head `ebe9b785f1dd3667166999de7b0df8eb1118cfc1` (2026-10-20). Environment: Ubuntu 24.04, Node 22, Playwright 1.58.2 and Chromium 145.0.7632.6. The local browser download failed, so no local Chromium pass is claimed. The suite covers two same-origin tabs delivering one immutable operation, two isolated browser stores conflicting at the same game version, explicit repeatable account-copy recovery with both histories retained, cold repository reopen and local save while browser networking is offline, reconnect delivery with original entry IDs, cross-tab sign-out, and deletion/tombstone/recovery retention across page reload. The test never clears storage as a recovery step. Browser contexts are disposable test stores only.
 
-This is supporting automated evidence for portions of the matrix, not completion of any full-app/device row. Every physical-device/production-auth/manual row above remains pending. Next collect a new iPhone binary and isolated browser/device run results, including effective flags and actual API capabilities, before authorizing rollout.
+This is supporting automated evidence for portions of the matrix, not completion of any full-app/device row. Every physical-device/production-auth/manual row above remains pending. Next collect the in-place iPhone/browser run results, including effective flags and actual API capabilities, before declaring acceptance.
 
 
 | Controlled browser assertion | Recorded result |
