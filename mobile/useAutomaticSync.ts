@@ -9,7 +9,7 @@ export function useAutomaticSync(enabled:boolean,key:string|null,run:(signal:Abo
  const controller=useRef<ReturnType<typeof createAutomaticSync>|null>(null);
  useEffect(()=>{
   if(!enabled||!key)return;
-  const value=createAutomaticSync({enabled:true,run:(signal,refresh)=>latest.current.key===key?latest.current.run(signal,refresh):Promise.resolve('cancelled')});controller.current=value;
+  const value=createAutomaticSync({enabled:true,refreshIntervalMs:30000,run:(signal,refresh)=>latest.current.key===key?latest.current.run(signal,refresh):Promise.resolve('cancelled')});controller.current=value;
   let closed=false,foreground=AppState.currentState==='active',online=true,revision=0;
   const active=()=>value.setActive(foreground&&online);
   const observe=(state:Network.NetworkState)=>{

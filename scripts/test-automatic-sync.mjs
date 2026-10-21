@@ -42,6 +42,28 @@ try{
   const time=clock();let calls=0;const auto=createAutomaticSync({enabled:true,clock:time,retryMs:[],run:async()=>{calls++;return 'retry'}});
   auto.setActive(true);await time.advance(1000);auto.wake();auto.setActive(false);await time.advance(100000);assert.equal(calls,1,'background cancels delayed recovery');auto.close();assert.equal(time.size(),0);
  }
+ // Both platforms opt into foreground refresh: remote reads, transient recovery,
+ // single-flight behavior and terminal parking without user coordination.
+ {
+  const time=clock(),calls=[],hold=deferred();
+  const auto=createAutomaticSync({enabled:true,clock:time,refreshIntervalMs:30000,run:async(signal,refresh)=>{calls.push({signal,refresh});if(calls.length===2)await hold.promise;return 'done'}});
+  auto.setActive(true);await time.advance(1000);assert.equal(calls.length,1);
+  await time.advance(30000);assert.equal(calls.length,2);assert.equal(calls[1].refresh,true);
+  await time.advance(90000);assert.equal(calls.length,2,'periodic reads cannot overlap a flight');
+  hold.resolve();await turn();await time.advance(1000);assert.equal(calls.length,3,'coalesces missed refreshes');
+  auto.setActive(false);assert.equal(time.size(),0);await time.advance(120000);assert.equal(calls.length,3);
+  auto.setActive(true);await time.advance(1000);assert.equal(calls.length,4);auto.close();assert.equal(time.size(),0);
+ }
+ {
+  const time=clock();let calls=0;
+  const auto=createAutomaticSync({enabled:true,clock:time,refreshIntervalMs:30000,retryMs:[],run:async()=>++calls===1?'retry':'done'});
+  auto.setActive(true);await time.advance(60000);assert.equal(calls,1,'refresh respects failure cooldown');await time.advance(2000);assert.equal(calls,2,'transient failure recovers without reconnect');auto.close();
+ }
+ {
+  const time=clock();let calls=0;
+  const auto=createAutomaticSync({enabled:true,clock:time,refreshIntervalMs:30000,run:async()=>{calls++;return 'blocked'}});
+  auto.setActive(true);await time.advance(180000);assert.equal(calls,1,'periodic refresh cannot loop on sign-in or capability blocks');auto.close();assert.equal(time.size(),0);
+ }
  assert.equal(automaticResult(false,{status:'sign-in',lastConnectedAt:null}),'blocked');assert.equal(automaticResult(false,{status:'unavailable',lastConnectedAt:null,diagnostic:{code:'CAPABILITY_REQUIRED'}}),'blocked');assert.equal(automaticResult(true,{status:'connected',lastConnectedAt:1,delivery:{phase:'pending'}}),'retry');assert.equal(automaticResult(true,{status:'connected',lastConnectedAt:1,delivery:{phase:'needs-review'}}),'done');
  // Run both actual platform hooks with effect/ref and surface fakes. A render
  // for a new account cannot redirect an old timer to its new callback.
@@ -50,7 +72,7 @@ try{
   const surface={addEventListener:(name,fn)=>{listeners.set(name,fn);return {remove:()=>listeners.delete(name)}},removeEventListener:(name,fn)=>{if(listeners.get(name)===fn)listeners.delete(name)},get currentState(){return nativeState}};
   const react={useRef:initial=>refs[index++]??(refs[index-1]={current:initial}),useEffect:fn=>pendingEffects.push(fn)};
   const module={exports:{}},compiled=ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-  const create=options=>{const c={options,active:[],requests:0,closed:false,setActive:v=>c.active.push(v),wake:()=>{},request:()=>c.requests++,recovered:()=>{},close:()=>{c.closed=true}};controllers.push(c);return c};
+  const create=options=>{assert.equal(options.refreshIntervalMs,30000,'web/native enable the same foreground refresh');const c={options,active:[],requests:0,closed:false,setActive:v=>c.active.push(v),wake:()=>{},request:()=>c.requests++,recovered:()=>{},close:()=>{c.closed=true}};controllers.push(c);return c};
   const load=name=>name==='react'?react:name==='react-native'?{AppState:surface}:{createAutomaticSync:create};
   new Function('require','module','exports','window','document','navigator',compiled)(load,module,module.exports,surface,{...surface,get visibilityState(){return visibility}},{get onLine(){return online}});
   const render=(key,run)=>{index=0;return module.exports.useAutomaticSync(true,key,run)};
