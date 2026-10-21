@@ -22,8 +22,8 @@ function harness({monitorFails=false,initial='active'}={}){
  h.snapshots[0].resolve({isConnected:true});await turn();await h.time.advance(1000);assert.equal(calls,0,'stale initial snapshot cannot overwrite newer offline event');
  h.network({});h.network({isInternetReachable:false});await h.time.advance(1000);assert.equal(calls,0,'unknown state cannot reopen an offline gate');
  h.network({isConnected:true});await h.time.advance(750);assert.equal(calls,1,'network recovery wakes without AppState change');
- for(let i=0;i<50;i++)h.network({isConnected:true});await h.time.advance(100000);assert.equal(calls,1,'duplicate online events do not poll');
- h.app('background');h.network({isConnected:false});h.network({isConnected:true});await h.time.advance(100000);assert.equal(calls,1,'network cannot run background work');h.app('active');await h.time.advance(750);assert.equal(calls,2);h.close();assert.equal(h.listeners(),0);assert.equal(h.time.size(),0);
+ for(let i=0;i<50;i++)h.network({isConnected:true});await h.time.advance(100000);assert.equal(calls,4,'duplicate online events add no requests beyond scheduled foreground refresh');
+ h.app('background');h.network({isConnected:false});h.network({isConnected:true});await h.time.advance(100000);assert.equal(calls,4,'network cannot run background work');h.app('active');await h.time.advance(750);assert.equal(calls,5);h.close();assert.equal(h.listeners(),0);assert.equal(h.time.size(),0);
 }
 {
  const h=harness(),hold=deferred(),signals=[];h.render(true,'A',async signal=>{signals.push(signal);if(signals.length===1)await hold.promise;return 'done'});h.commit();await h.time.advance(750);h.network({isConnected:false});assert.equal(signals[0].aborted,true);h.network({isConnected:true});hold.resolve();await turn();await h.time.advance(5000);assert.equal(signals.length,2,'cancelled pass resumes once after recovery');h.close();
