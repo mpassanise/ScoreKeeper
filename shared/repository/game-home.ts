@@ -26,7 +26,7 @@ export function homeResult(rows:HomeGame[]):AccountGameHome{
  const states=Object.fromEntries(rows.map(row=>[row.gameId,row]));
  return {states,games:rows.flatMap(row=>row.summary?[row.summary]:[]).sort((a,b)=>Date.parse(b.updated)-Date.parse(a.updated)),savedCopies:rows.filter(row=>row.hidden||row.retained||row.sync==='needs-review')};
 }
-export function homeStatus(row:HomeGame|undefined){return row?.sync==='needs-review'?'Review needed':row?.sync==='pending'?'Changes waiting to sync':''}
+export function homeStatus(row:HomeGame|undefined){return row?.sync==='needs-review'?'Sync needs attention':row?.sync==='pending'?'Changes waiting to sync':''}
 
 function cleanSummary(g:GameSummary):GameSummary{
  if(!g||typeof g!=='object')throw new LocalRepositoryError('STORAGE_CORRUPT','Invalid saved game summary.');

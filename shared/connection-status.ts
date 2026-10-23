@@ -32,7 +32,7 @@ function diagnostic(error:unknown,attempt:string,stage:ConnectionStage,started:n
 }
 export function connectionText(state:ConnectionState){switch(state.status){
  case 'connecting':return state.slow?'Still connecting to your account…':'Connecting to your account…';
- case 'connected':return state.delivery?.phase==='needs-review'?'Account connected · changes need review':state.delivery?.phase==='pending'?'Account connected · changes waiting':'Account connected';
+ case 'connected':return state.delivery?.phase==='needs-review'?'Account connected · sync needs attention':state.delivery?.phase==='pending'?'Account connected · changes waiting':'Account connected';
  case 'offline':return 'Offline · account sync unavailable';
  case 'sign-in':return 'Sign in to reconnect your account';
  case 'unavailable':return 'Account sync unavailable';
