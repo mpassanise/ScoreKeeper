@@ -71,6 +71,15 @@ export function createRepositoryPilot(options:{enabled:boolean;recoveryEnabled?:
    const stored=adoptions.get(review);if(!stored||stored.selector!==scope.selector||stored.profileId!==lease.profileId)throw stale();const captured=lease,{access}=await repository();valid(scope);
    try{const read=await access.admitAdoption(captured,stored.ticket,raw,stored.gameId);valid(scope);options.publish?.();try{options.onQueued?.()}catch{/* Scheduling cannot turn a durable save into a failure. */}return read}catch(error){invalidate(scope,error);throw error}
   })},
+  creationProfile(scope:ReadScope|null){return serial(async()=>{if(!scope)throw stale();valid(scope);const {access}=await repository();valid(scope);if(!lease){lease=await access.restore(scope.selector)??undefined;valid(scope);if(lease)proof=lease}if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');return lease.profileId})},
+  enqueueCreation(scope:ReadScope|null,input:import('../game-operation-contract').GameLifecycleOperation,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as import('../game-operation-contract').GameLifecycleOperation;return serial(async()=>{
+   if(!options.enabled||!options.scoringEnabled||!options.coldWritesEnabled||!options.automaticSyncEnabled||!scope)throw stale();valid(scope);
+   const {access}=await repository();valid(scope);
+   if(!lease){lease=await access.restore(scope.selector)??undefined;valid(scope);if(lease)proof=lease}
+   if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');
+   const captured=lease;if(captured.profileId!==expectedProfileId)throw new AccountAccessError('PROFILE_MISMATCH');
+   try{const read=await access.enqueueCreation(captured,detached);valid(scope);options.publish?.();try{options.onQueued?.()}catch{/* Local durability does not depend on scheduling. */}return read}catch(error){invalidate(scope,error);throw error}
+  })},
   prepareScoring(scope:ReadScope|null,input:GameView,expectedProfileId:string){const detached=JSON.parse(JSON.stringify(input)) as GameView;return serial(async()=>{
    if(!options.enabled||!options.scoringEnabled||!scope)throw stale();valid(scope);if(!lease)throw new AccountAccessError('ACCOUNT_UNVERIFIED');const captured=lease;
    if(captured.profileId!==expectedProfileId)throw Object.assign(new Error('Account changed. Reopen the game before preparing score entry.'),{code:'SCORING_BINDING_CHANGED'});
