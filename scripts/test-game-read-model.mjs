@@ -16,7 +16,7 @@ try{
  const {openConfirmedGames}=require(path.join(root,'repository/indexeddb-confirmed-games.js'));
  const {openSQLiteConfirmedGames}=require(path.join(root,'repository/sqlite-confirmed-games.js'));
  const {gameView}=require(path.join(root,'local-games.js'));
- const {openGameScreen,observeGameScreen,gameScreenMessage}=require(path.join(root,'repository/game-screen.js'));
+ const {openGameScreen,observeGameScreen,gameScreenMessage,showGameSyncNotice}=require(path.join(root,'repository/game-screen.js'));
  const status=profileId=>({profileId,deletionStatus:null,deletionEnabled:true});
  const cap={version:1,receipts:'retained',atomicGameAndReceipt:true,kinds:['action','create','import','delete'],actions:['score','edit','undo','select','rules','finish','resume']};
  function base(){const players=[{id:randomUUID(),name:'One'},{id:randomUUID(),name:'Two'}];return {id:randomUUID(),name:'Game',players,winner:'high',entries:[],next:players[0].id,finished:false,version:1,updated:'2026-10-19T00:00:00Z',playStyle:'free',scoreMode:'add'}}
@@ -25,6 +25,10 @@ try{
  const rejects=(fn,code)=>assert.rejects(fn,e=>e.code===code);
  let opens=0;const disabled=createRepositoryPilot({enabled:false,open:async()=>{opens++;throw Error('disabled')},onInvalidated:()=>assert.fail()});
  assert.equal(await disabled.readGame(null,'anything'),null);await disabled.record(null,gameView(base()));assert.equal(opens,0);await disabled.close();
+ assert.equal(showGameSyncNotice({kind:'game',sync:'pending',scoreAccess:'ready',canScore:true}),false,'routine automatic saves do not add scoring clutter');
+ assert.equal(showGameSyncNotice({kind:'game',sync:'confirmed',scoreAccess:'ready',canChangeCompletion:true}),false,'completed synced games stay quiet');
+ assert.equal(showGameSyncNotice(null,true),true,'an unconfirmed local save still offers retry');
+ assert.equal(showGameSyncNotice({kind:'game',sync:'confirmed',scoreAccess:'connect'}),true,'required sign-in remains actionable');
  const factory=new IDBFactory(),file=path.join(root,'native.db');
  function queries(db){return {execAsync:async sql=>db.exec(sql),runAsync:async(sql,...p)=>db.prepare(sql).run(...p),getFirstAsync:async(sql,...p)=>db.prepare(sql).get(...p)||null,getAllAsync:async(sql,...p)=>db.prepare(sql).all(...p)}}
  function sqlite(){const db=new DatabaseSync(file);return {...queries(db),closeAsync:async()=>db.close(),withExclusiveTransactionAsync:async work=>{const tx=new DatabaseSync(file);try{tx.exec('BEGIN');try{await work(queries(tx));tx.exec('COMMIT')}catch(e){tx.exec('ROLLBACK');throw e}}finally{tx.close()}}}}
@@ -80,7 +84,7 @@ try{
   let fetches=0;const neverFetch=async()=>{fetches++;throw Error('retained game must not need network')};
   assert.equal((await openGameScreen(pilot,scope,g.id,neverFetch)).view.game.entries.length,2);
   assert.equal((await openGameScreen(pilot,scope,deleted.id,neverFetch)).kind,'deleted');assert.equal((await observeGameScreen(pilot,scope,deleted.id,gameView(deleted))).kind,'deleted','late live GET cannot resurrect a settled deletion');assert.equal(fetches,0);
-  const retainedMismatch=await observeGameScreen(pilot,scope,mismatch.id,gameView({...mismatch,version:2}));assert.equal(retainedMismatch.sync,'needs-review');assert.equal(retainedMismatch.view.game.entries.length,1);assert.ok(gameScreenMessage(retainedMismatch).title.includes('review'));
+  const retainedMismatch=await observeGameScreen(pilot,scope,mismatch.id,gameView({...mismatch,version:2}));assert.equal(retainedMismatch.sync,'needs-review');assert.equal(retainedMismatch.view.game.entries.length,1);assert.equal(gameScreenMessage(retainedMismatch).title,'This game needs attention');assert.equal(showGameSyncNotice(retainedMismatch),true);
   const remote=base();const firstRemote=await openGameScreen(pilot,scope,remote.id,async()=>{fetches++;return gameView(remote)});assert.equal(firstRemote.kind,'game');assert.equal(fetches,1);await openGameScreen(pilot,scope,remote.id,neverFetch);assert.equal(fetches,1);
   await rejects(()=>openGameScreen(pilot,scope,randomUUID(),async()=>gameView(remote)),'INVALID_SNAPSHOT');
   // Same-version contradictions are durable review evidence for cache and queue.
