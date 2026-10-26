@@ -1,3 +1,4 @@
+import {scoreTotals,countdownProgress} from './scoring';
 import {applyGameEdit} from './game-edit';
 import {validateTargetEnding,targetEndRound,remainingTargetPlayers,finalRoundMessage} from './target-ending';
 import {validateTargetScore,validateScoreLimit} from './score-limit';
@@ -5,30 +6,40 @@ import {ApiError,type Action,type Game,type GameView,type Rules} from "./api";
 export const guestKey="scorekeeper-v1";
 export type Storage={read:()=>Promise<string|null>;write:(value:string)=>Promise<void>};
 export function validateRules(winner:string,rules:Rules){
- if(!["high","low"].includes(winner))throw new Error("Choose highest or lowest score wins.");
+ if(!["high","low","zero"].includes(winner))throw new Error("Choose highest, lowest, or reduce to zero.");
  if(!["turns","free"].includes(rules.playStyle||"turns"))throw new Error("Choose a valid play style.");
- if(!["add","total"].includes(rules.scoreMode||"add"))throw new Error("Choose a valid score entry mode.");
+ if(!["add","total","subtract"].includes(rules.scoreMode||"add"))throw new Error("Choose a valid score entry mode.");
  if(rules.presetId!==undefined&&(typeof rules.presetId!=="string"||rules.presetId.length>60))throw new Error("Invalid preset identifier.");
  if(rules.presetVersion!==undefined&&(!Number.isInteger(rules.presetVersion)||rules.presetVersion<1))throw new Error("Invalid preset version.");
+ if(winner==='zero'){
+  if(rules.scoreMode!=='subtract'||rules.endCondition!=='target'||rules.targetScore!==0)throw new Error('Reduce to 0 uses subtract scoring and a zero target.');
+  if(!Number.isInteger(rules.startingScore)||rules.startingScore!<1||rules.startingScore!>100000)throw new Error('Starting number must be a whole number from 1 to 100,000.');
+  if(rules.exactZero!==undefined&&typeof rules.exactZero!=='boolean')throw new Error('Choose whether exact zero is required.');
+ }else if(rules.scoreMode==='subtract'||rules.startingScore!=null||rules.exactZero!=null)throw new Error('Countdown rules require Reduce to 0.');
  const mode=rules.endCondition||"manual";
  if(mode==="rounds"&&rules.playStyle==="free")throw new Error("Fixed rounds require turn-based play. Choose manual or target-score ending for free-for-all.");
  if(!["manual","rounds","target"].includes(mode))throw new Error("Choose a valid ending rule.");
  if(mode==="rounds"&&(!Number.isInteger(rules.roundLimit)||rules.roundLimit!<1||rules.roundLimit!>Math.floor(10000/2)))throw new Error("Use a round limit between 1 and 5000.");
  validateTargetScore(rules);validateTargetEnding(rules);
 }
-export function totals(g:Game){return Object.fromEntries(g.players.map(p=>[p.id,g.scoreMode==="total"?(g.entries.filter(e=>e.playerId===p.id).at(-1)?.points||0):g.entries.filter(e=>e.playerId===p.id).reduce((n,e)=>n+e.points,0)]))}
+export const totals=scoreTotals;
 export function completedRounds(g:Game){return Math.min(...g.players.map(p=>g.entries.filter(e=>e.playerId===p.id).length))}
 export function autoEnd(g:Game):Game{
  const finalRound=targetEndRound(g);
- const reached=g.endCondition==="rounds"?completedRounds(g)>=g.roundLimit!:g.endCondition==="target"?(g.targetEnd==="round"?finalRound!==null&&completedRounds(g)>=finalRound:Object.values(totals(g)).some(t=>t>=g.targetScore!)):false;
+ const reached=g.endCondition==="rounds"?completedRounds(g)>=g.roundLimit!:g.endCondition==="target"?(g.targetEnd==="round"?finalRound!==null&&completedRounds(g)>=finalRound:g.winner==='zero'?countdownProgress(g).firstZero!==undefined:Object.values(totals(g)).some(t=>t>=g.targetScore!)):false;
  if(reached)return {...g,finished:true,finishReason:g.endCondition as "rounds"|"target"};
  const remaining=remainingTargetPlayers(g);
  if(remaining?.length&&!remaining.some(p=>p.id===g.next)){const start=g.players.findIndex(p=>p.id===g.next);const next=Array.from({length:g.players.length},(_,i)=>g.players[(start+i)%g.players.length]).find(p=>remaining.some(r=>r.id===p.id))!;g={...g,next:next.id}}
  return g.finishReason==="rounds"||g.finishReason==="target"?{...g,finished:false,finishReason:undefined}:g;
 }
-export function gameView(g:Game):GameView{const scores=totals(g);const best=g.winner==="high"?Math.max(...Object.values(scores)):Math.min(...Object.values(scores));return {game:g,totals:scores,winnerIds:g.finished&&g.entries.length?g.players.filter(p=>scores[p.id]===best).map(p=>p.id):[]}}
-export function rulesLabel(g:Game){const ending= g.endCondition==="rounds"?`Round ${Math.min(completedRounds(g)+1,g.roundLimit!)} of ${g.roundLimit}`:g.endCondition==="target"?`Score limit ${g.targetScore} · ${g.targetEnd==="round"?"Ends at end of round":"Ends immediately"}`:"Finish whenever you're ready";return `${g.playStyle==="free"?"Free-for-all":"Turn-based"} · ${g.scoreMode==="total"?"Enter current totals":"Add points"} · ${ending}`}
-export function validateGameCreation(name:string,names:string[],winner:"high"|"low",rules:Rules={}){
+export function gameView(g:Game):GameView{
+ const countdown=g.winner==='zero'?countdownProgress(g):undefined,scores=countdown?.scores??totals(g);
+ const best=g.winner==='high'?Math.max(...Object.values(scores)):Math.min(...Object.values(scores));
+ const winnerIds=!g.finished||!g.entries.length?[]:countdown?(countdown.firstZero?[countdown.firstZero]:[]):g.players.filter(p=>scores[p.id]===best).map(p=>p.id);
+ return {game:g,totals:scores,winnerIds};
+}
+export function rulesLabel(g:Game){const ending= g.winner==='zero'?`Start at ${g.startingScore?.toLocaleString()} · ${g.exactZero?'Exact zero required':'Stop at zero'} · ${g.targetEnd==='round'?'Ends at end of round':'Ends immediately'}`:g.endCondition==="rounds"?`Round ${Math.min(completedRounds(g)+1,g.roundLimit!)} of ${g.roundLimit}`:g.endCondition==="target"?`Score limit ${g.targetScore} · ${g.targetEnd==="round"?"Ends at end of round":"Ends immediately"}`:"Finish whenever you're ready";return `${g.playStyle==="free"?"Free-for-all":"Turn-based"} · ${g.winner==="zero"?"Subtract points":g.scoreMode==="total"?"Enter current totals":"Add points"} · ${ending}`}
+export function validateGameCreation(name:string,names:string[],winner:"high"|"low"|"zero",rules:Rules={}){
  const clean=names.map(n=>n.trim()).filter(Boolean);if(!name.trim()||name.trim().length>60||clean.length<2||clean.length>20||clean.some(n=>n.length>30)||new Set(clean.map(n=>n.toLowerCase())).size!==clean.length)throw new Error("Enter a game name and 2–20 different player names.");validateRules(winner,rules);if(rules.endCondition==="rounds"&&rules.roundLimit!*clean.length>10000)throw new Error("Round limit exceeds the maximum 10000 turns.");
  return clean;
 }
@@ -41,7 +52,7 @@ export class LocalGames{
  async get(id:string){const g=(await this.read()).find(g=>g.id===id);if(!g)throw new Error("Game not found on this device.");return gameView(g)}
  async forget(id:string){const games=await this.read();await this.storage.write(JSON.stringify(games.filter(g=>g.id!==id)))}
  async deleteGame(game:Pick<Game,'id'|'version'>){const games=await this.read(),g=games.find(g=>g.id===game.id);if(!g)return {deleted:true};if(g.version!==game.version)throw new ApiError(409,'This game changed. Refresh before deleting.');if(g.finished)throw new Error('Only in-progress games can be deleted.');await this.storage.write(JSON.stringify(games.filter(g=>g.id!==game.id)));return {deleted:true}}
- async create(id:string,name:string,names:string[],winner:"high"|"low",rules:Rules={},options:{deviceOnly?:boolean}={}){
+ async create(id:string,name:string,names:string[],winner:"high"|"low"|"zero",rules:Rules={},options:{deviceOnly?:boolean}={}){
  const clean=validateGameCreation(name,names,winner,rules);
  const players=clean.map(name=>({id:this.uuid(),name}));const now=new Date().toISOString();return this.put({id,name:name.trim(),players,winner,...rules,...(options.deviceOnly?{deviceOnly:true}:{}),entries:[],next:players[0].id,finished:false,startedAt:now,endedAt:null,version:1,updated:now})}
  async act(game:Game,a:Action){let g=(await this.get(game.id)).game;const originalFinished=g.finished,originalEndedAt=g.endedAt;if(g.version!==game.version)throw new ApiError(409,"This game changed in another window. Refresh before scoring.");

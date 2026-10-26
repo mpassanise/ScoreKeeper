@@ -2,11 +2,12 @@ import type {GameSummary,GameView,Rules,ScorekeeperApi} from './api';
 import {validateGameCreation,type LocalGames} from './local-games';
 import {needsAdvancedRules} from './presets';
 async function bounded<T>(work:()=>Promise<T>,ms:number):Promise<T>{let timer:ReturnType<typeof setTimeout>;try{return await Promise.race([work(),new Promise<T>((_,reject)=>{timer=setTimeout(()=>reject(new Error('Account saving timed out.')),ms)})])}finally{clearTimeout(timer!)}}
-export async function startGame({local,cloud,signedIn,deviceOnly=false,name,players,winner,rules,uuid,timeoutMs=5000}:{local:LocalGames;cloud:Pick<ScorekeeperApi,'account'|'create'>;signedIn:boolean;deviceOnly?:boolean;name:string;players:string[];winner:'high'|'low';rules:Rules;uuid:()=>string;timeoutMs?:number}):Promise<{view:GameView;deviceOnly:boolean;message:string}>{
+export async function startGame({local,cloud,signedIn,deviceOnly=false,name,players,winner,rules,uuid,timeoutMs=5000}:{local:LocalGames;cloud:Pick<ScorekeeperApi,'account'|'create'>;signedIn:boolean;deviceOnly?:boolean;name:string;players:string[];winner:'high'|'low'|'zero';rules:Rules;uuid:()=>string;timeoutMs?:number}):Promise<{view:GameView;deviceOnly:boolean;message:string}>{
  const clean=validateGameCreation(name,players,winner,rules);
  if(signedIn&&!deviceOnly){try{
   const status=await bounded(()=>cloud.account(),Math.min(timeoutMs,2000));
   if(status.deletionStatus)throw new Error('Account saving unavailable.');
+  if(winner==='zero'&&(status.scoringRulesVersion||0)<4)throw new Error('Account countdown rules unavailable.');
   if(needsAdvancedRules(rules,winner)&&(status.scoringRulesVersion||0)<2)throw new Error('Account rules unavailable.');
   if(rules.targetEnd==='round'&&(status.scoringRulesVersion||0)<3)throw new Error('Account round endings unavailable.');
   const view=await bounded(()=>cloud.create(uuid(),name,clean,winner,rules),timeoutMs);

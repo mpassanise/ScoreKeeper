@@ -31,7 +31,7 @@ export function homeStatus(row:HomeGame|undefined){return row?.sync==='needs-rev
 function cleanSummary(g:GameSummary):GameSummary{
  if(!g||typeof g!=='object')throw new LocalRepositoryError('STORAGE_CORRUPT','Invalid saved game summary.');
  const {id,name,players,winner,finished,version,updated,startedAt,endedAt,turnCount}=g;
- if(!id||typeof id!=='string'||typeof name!=='string'||!Array.isArray(players)||players.length<2||players.length>20||players.some(p=>!p||typeof p.id!=='string'||typeof p.name!=='string')||!['high','low'].includes(winner)||typeof finished!=='boolean'||!Number.isSafeInteger(version)||version<1||typeof updated!=='string'||!Number.isFinite(Date.parse(updated))||!Number.isSafeInteger(turnCount)||turnCount<0||turnCount>10000)throw new LocalRepositoryError('STORAGE_CORRUPT','Saved game summaries could not be checked. Existing copies have been kept.');
+ if(!id||typeof id!=='string'||typeof name!=='string'||!Array.isArray(players)||players.length<2||players.length>20||players.some(p=>!p||typeof p.id!=='string'||typeof p.name!=='string')||!['high','low','zero'].includes(winner)||typeof finished!=='boolean'||!Number.isSafeInteger(version)||version<1||typeof updated!=='string'||!Number.isFinite(Date.parse(updated))||!Number.isSafeInteger(turnCount)||turnCount<0||turnCount>10000)throw new LocalRepositoryError('STORAGE_CORRUPT','Saved game summaries could not be checked. Existing copies have been kept.');
  return {id,name,players:players.map(p=>({id:p.id,name:p.name})),winner,finished,version,updated,startedAt,endedAt,turnCount};
 }
 /** Display index only, never a snapshot or write authority. Merge rather than

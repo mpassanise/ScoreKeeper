@@ -1,0 +1,4 @@
+{
+  "wire": "{\"protocolVersion\":1,\"kind\":\"create\",\"operationId\":\"dddddddd-dddd-4ddd-8ddd-dddddddddddd\",\"gameId\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"expectedVersion\":0,\"game\":{\"id\":\"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"name\":\"Legacy\",\"players\":[{\"id\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"name\":\"A\"},{\"id\":\"cccccccc-cccc-4ccc-8ccc-cccccccccccc\",\"name\":\"B\"}],\"winner\":\"high\",\"entries\":[],\"next\":\"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\"finished\":false,\"version\":1,\"updated\":\"2026-10-26T00:00:00+00:00\",\"endCondition\":\"manual\",\"roundLimit\":null,\"targetScore\":null,\"finishReason\":null,\"playStyle\":\"turns\",\"scoreMode\":\"add\",\"presetId\":null,\"presetVersion\":null,\"startedAt\":null,\"endedAt\":null,\"targetEnd\":\"immediate\"}}",
+  "fingerprint": "028658CEBFE32393E16A062FA22BB79C0C0E958065E4FA4618FE9F126AE5503D"
+}

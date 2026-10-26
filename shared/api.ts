@@ -6,11 +6,11 @@ import {validateTargetEnding} from './target-ending';
 import {validateTargetScore,validateScoreAction,validateScoreLimit} from './score-limit';
 export type Player={id:string;name:string};
 export type Entry={id:string;playerId:string;points:number};
-export type Rules={playStyle?:"turns"|"free";scoreMode?:"add"|"total";presetId?:string;presetVersion?:number;endCondition?:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
-export type Game=Rules & {id:string;name:string;players:Player[];winner:"high"|"low";entries:Entry[];next:string;finished:boolean;deviceOnly?:boolean;startedAt?:string|null;endedAt?:string|null;finishReason?:"manual"|"rounds"|"target";version:number;updated:string};
+export type Rules={startingScore?:number;exactZero?:boolean;playStyle?:"turns"|"free";scoreMode?:"add"|"total"|"subtract";presetId?:string;presetVersion?:number;endCondition?:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
+export type Game=Rules & {id:string;name:string;players:Player[];winner:"high"|"low"|"zero";entries:Entry[];next:string;finished:boolean;deviceOnly?:boolean;startedAt?:string|null;endedAt?:string|null;finishReason?:"manual"|"rounds"|"target";version:number;updated:string};
 export type GameView={game:Game;totals:Record<string,number>;winnerIds:string[]};
 export type GameSummary=Pick<Game,"id"|"name"|"players"|"winner"|"finished"|"version"|"updated"|"startedAt"|"endedAt"|"deviceOnly"> & {turnCount:number};
-export type GameRuleEdit={name:string;winner:"high"|"low";endCondition:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
+export type GameRuleEdit={name:string;winner:"high"|"low"|"zero";endCondition:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
 export type Action={rules?:GameRuleEdit;action:"score"|"edit"|"select"|"undo"|"finish"|"resume"|"rules";points?:number;playerId?:string;entryId?:string};
 export type AccountStatus={gameOperations?:GameOperationCapability|null;gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
@@ -63,6 +63,7 @@ export class ScorekeeperApi{
   throw new ApiError(503,'Account service is unavailable.');
  }
 
+ private async requireCountdown(){if(((await this.account()).scoringRulesVersion??0)<4)throw new Error('Reduce to 0 is not available for this account yet. Reconnect and try again, or play locally.')}
  private async requireRoundEnding(rules:Rules){if(rules.targetEnd==='round'&&((await this.account()).scoringRulesVersion||0)<3)throw new Error('End-of-round scoring is not available for your account yet. Sync Games after the API update, or sign out to play locally.')}
  // Inactive replay transport seam; preserve the exact admitted queue bytes, with no write retry here.
  operation(wire:string){if(typeof wire!=='string'||!wire.trim()||wire.length>2_000_000)throw new Error('Use one bounded immutable operation.');const envelope=JSON.parse(wire);if(!envelope||envelope.protocolVersion!==1||!['action','create','import','delete'].includes(envelope.kind))throw new Error('Use a v1 game operation.');return this.request<OperationAcknowledgement>('/game-operations',wire,true)}
@@ -72,7 +73,7 @@ export class ScorekeeperApi{
  list(){return this.request<GameSummary[]>("/games")}
  get(id:string){return this.request<GameView>(`/games/${encodeURIComponent(id)}`)}
  async deleteGame(game:Pick<Game,'id'|'version'>){this.requireGameWrites();try{return await this.request<{deleted:boolean}>(`/games/${encodeURIComponent(game.id)}/delete`,{expectedVersion:game.version})}catch(e){if(e instanceof ApiError&&e.status===404)throw new Error('Game deletion requires the latest API deployment. Your game has been kept.');throw e}}
- create(id:string,name:string,players:string[],winner:"high"|"low",rules:Rules={}){this.requireGameWrites();validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
- act(game:Game,action:Action){this.requireGameWrites();validateScoreAction(game,action);if(action.action==='rules')applyGameEdit(game,action.rules);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return action.action==='rules'?this.account().then(status=>{if(!status.gameEditingEnabled)throw new Error('Editing account games requires the latest API deployment. Your game has not changed.');return save()}):game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
- import(game:Game){this.requireGameWrites();validateTargetScore(game);validateScoreLimit(game);validateTargetEnding(game);const save=()=>this.request<GameView>("/games/import",game);return game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
+ create(id:string,name:string,players:string[],winner:"high"|"low"|"zero",rules:Rules={}){this.requireGameWrites();validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return winner==='zero'?this.requireCountdown().then(save):rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
+ act(game:Game,action:Action){this.requireGameWrites();validateScoreAction(game,action);if(action.action==='rules')applyGameEdit(game,action.rules);const save=()=>this.request<GameView>(`/games/${encodeURIComponent(game.id)}/actions`,{...action,expectedVersion:game.version});return game.winner==='zero'?this.requireCountdown().then(save):action.action==='rules'?this.account().then(status=>{if(!status.gameEditingEnabled)throw new Error('Editing account games requires the latest API deployment. Your game has not changed.');return save()}):game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
+ import(game:Game){this.requireGameWrites();validateTargetScore(game);validateScoreLimit(game);validateTargetEnding(game);const save=()=>this.request<GameView>("/games/import",game);return game.winner==='zero'?this.requireCountdown().then(save):game.targetEnd==="round"?this.requireRoundEnding(game).then(save):save()}
 }
