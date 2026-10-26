@@ -664,3 +664,10 @@ Rollout: this branch builds on the iPhone tray PR 96; merge that dependency firs
 Removed winner/rule descriptions from the pinned iPhone header; Game details in the game menu retains all rules and timestamps. Removed the redundant free-for-all scoring subtitle, while retaining numbered turn context for turn-based games. Game title, safe-area handling, themes, player pills and the fixed four-action tray remain intact. Scoring, persistence and sync behavior are unchanged.
 
 Validation: native TypeScript, pinned-scorer and countdown component checks. Architect review: presentation-only changes; no changes to IDs, receipts, account isolation, writes or replay behavior. Physical iPhone fit with larger text, expanded guides and smaller screens remains a device acceptance check; scrolling remains available for overflow. Next: verify the default collapsed scoring guide and full keypad/action row on iPhone.
+
+
+### New game — independent setup retries
+
+Fixed the shared web/iPhone creator retaining one failed request per login and blocking every subsequent edited setup. Pending requests are now isolated by verified profile and exact setup. A new setup can save independently; returning to an uncertain setup retries the original game/operation IDs. Existing durable outbox recovery and automatic delivery remain authoritative; no saved game is discarded or transferred across accounts.
+
+Validation: automatic-sync regression covers changed setup after lost acknowledgement, original-ID retry and profile isolation; countdown and web/mobile type checks. Architect review: no wire/storage changes, preserved idempotency and account guards. Pending intentions remain in memory as before; physical device acceptance remains to be verified. Next: exercise new-game creation after failed initial creation on iPhone and web.
