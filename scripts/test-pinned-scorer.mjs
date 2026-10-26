@@ -63,11 +63,11 @@ let props={view:{game:{players,winner:'high'},totals:Object.fromEntries(players.
 let tree=render(Standings,props),strip=nodes(tree,n=>n.type==='ScrollView')[0],scrolls=[];strip.props.ref.current={scrollTo:p=>scrolls.push(p)};
 let pills=nodes(strip,n=>n.type==='Pressable');assert.equal(pills.length,20);pills.forEach((p,i)=>p.props.onLayout({nativeEvent:{layout:{x:i*140}}}));
 pills[19].props.onPress();assert.deepEqual(selected,['19']);
-nodes(tree,n=>n.props?.accessibilityLabel==='Show all 20 players')[0].props.onPress();tree=render(Standings,props);assert.equal(nodes(tree,n=>n.type==='SideDrawer')[0].props.visible,true);
-props={...props,selectedId:'19'};tree=render(Standings,props);tree=render(Standings,props);assert.equal(nodes(tree,n=>n.type==='SideDrawer')[0].props.visible,false);assert.equal(scrolls.at(-1).x,2644,'Selected offscreen player is revealed');
+assert.equal(nodes(tree,n=>n.type==='SideDrawer').length,0);assert.equal(nodes(tree,n=>n.props?.accessibilityRole==='header').length,1);
+props={...props,selectedId:'19'};tree=render(Standings,props);assert.equal(scrolls.at(-1).x,2644,'Selected offscreen player is revealed');
 props={...props,disabled:true};tree=render(Standings,props);assert.ok(nodes(nodes(tree,n=>n.type==='ScrollView')[0],n=>n.type==='Pressable').every(n=>n.props.disabled));
 props={...props,disabled:false,isPlayerDisabled:id=>id==='1'};tree=render(Standings,props);assert.equal(nodes(nodes(tree,n=>n.type==='ScrollView')[0],n=>n.type==='Pressable')[1].props.disabled,true);
-console.log('Native component trees: safe-area edges, theme-specific title, completion toolbar, 20-player selection, chooser lifecycle, selected-pill scrolling and eligibility passed.');
+console.log('Native component trees: safe-area edges, theme-specific title, completion toolbar, 20-player pill selection, static player heading, selected-pill scrolling and eligibility passed.');
 
 // Structural regression: history/editing share one native sheet and the tray
 // is outside vertical scrolling, so both actions remain reachable while scoring.

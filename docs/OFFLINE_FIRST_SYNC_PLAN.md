@@ -614,6 +614,12 @@ PR 94 CI follow-up: web failed because the manual-delivery integration assertion
 
 Follow-up outcome: manual-delivery and connection-status suites now pass locally. Final incremental architect review confirmed this is a test expectation correction only; the needs-review state is explicitly asserted and no lifecycle, sync or recovery protections were weakened. Await the new GitHub Actions run before merging.
 
+### iPhone UX follow-up — player pills only
+
+Mike requested removal of the Players caret/dropdown. Make Players · N a static heading and remove the secondary player chooser sheet. Players are selected directly through the horizontally scrollable ranked pills; selected-player auto-reveal, per-player eligibility, busy/pending/reorder gates and theme styles remain intact. Web and scoring/sync/data paths are unchanged.
+
+Updated the existing native component checks to cover 20-player pill selection, a noninteractive header, no player sheet and offscreen selected-player scrolling. Mobile TypeScript, pinned-scorer/standings checks and diff whitespace validation passed. Architect review of the final diff found no unresolved issues: removed presentation state has no persistence/lifecycle effects; all score intents retain existing guards. Physical-device visual acceptance remains after the iPhone update. No API/web deployment, migration or paid build started.
+
 ### iPhone UX iteration — pinned scorer
 
 Mike approved the pinned-scorer design before continuing architecture work. During a game, replace the brand header with the game title and winning/scoring/ending rules, outside the scrolling content. Keep native top/side safe-area insets for the Dynamic Island and bottom safe-area inset for Home/Finish Game. Dark-theme title is explicitly white; header, rule text, sync spinner/icon, selected player and toolbar use theme-appropriate colors. Details/timestamps and Edit game remain available from the game menu. Completed games retain Resume, with New game in the bottom toolbar.
