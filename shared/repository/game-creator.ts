@@ -6,7 +6,7 @@ import type {RepositoryPilot,ReadScope} from './pilot';
  * outbox owns the only playable account copy; guest storage is never imported. */
 export function createAccountGameCreator(uuid:()=>string){
  const pending=new Map<string,{fingerprint:string;profileId:string;operation:Promise<GameLifecycleOperation>;flight?:Promise<import('./game-read-model').AccountGameRead>}>();
- return {async create(repository:RepositoryPilot,scope:ReadScope,name:string,players:string[],winner:'high'|'low',rules:Rules){
+ return {async create(repository:RepositoryPilot,scope:ReadScope,name:string,players:string[],winner:'high'|'low'|'zero',rules:Rules){
   const profileId=await repository.creationProfile(scope);
   const fingerprint=JSON.stringify([name,players,winner,rules]);let intent=pending.get(scope.selector);
   if(intent&&(intent.fingerprint!==fingerprint||intent.profileId!==profileId))throw new Error('The previous game save is unconfirmed. Restore its setup and press Start again before starting another game.');

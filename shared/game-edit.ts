@@ -14,7 +14,9 @@ export function applyGameEdit(game:Game,rules:GameRuleEdit|undefined):Game{
  if(!rules)throw new Error('Choose the game rules to save.');
  const name=typeof rules.name==='string'?rules.name.trim():'';
  if(!name||name.length>60)throw new Error('Game name must contain 1–60 characters.');
- if(!['high','low'].includes(rules.winner))throw new Error('Choose highest or lowest score wins.');
+ if(!['high','low','zero'].includes(rules.winner))throw new Error('Choose highest or lowest score wins.');
+ if((game.winner==='zero')!==(rules.winner==='zero'))throw new Error('The countdown winner type is fixed after starting. Start a new game to change it.');
+ if(game.winner==='zero'){if(rules.endCondition!==game.endCondition||rules.targetScore!==0||(rules.targetEnd??'immediate')!==(game.targetEnd??'immediate'))throw new Error('Countdown scoring and ending rules are fixed after starting.');return {...game,name}}
  if(!['manual','rounds','target'].includes(rules.endCondition))throw new Error('Choose a valid ending rule.');
  const changed:Game={...game,name,winner:rules.winner,endCondition:rules.endCondition,roundLimit:rules.endCondition==='rounds'?rules.roundLimit:undefined,targetScore:rules.endCondition==='target'?rules.targetScore:undefined,targetEnd:rules.endCondition==='target'?(rules.targetEnd??'immediate'):'immediate'};
  if(changed.endCondition==='rounds'&&(game.playStyle==='free'||!Number.isInteger(changed.roundLimit)||changed.roundLimit!<1||changed.roundLimit!*game.players.length>10000))throw new Error('Fixed rounds require turn-based play and a positive limit within 10,000 turns.');
@@ -27,11 +29,11 @@ export function applyGameEdit(game:Game,rules:GameRuleEdit|undefined):Game{
  }
  return changed;
 }
-export type GameEditDraft={name:string;winner:'high'|'low';endCondition:'manual'|'rounds'|'target';limit:string;targetEnd:'immediate'|'round'};
+export type GameEditDraft={name:string;winner:'high'|'low'|'zero';endCondition:'manual'|'rounds'|'target';limit:string;targetEnd:'immediate'|'round'};
 export function gameEditDraft(game:Game):GameEditDraft{return {name:game.name,winner:game.winner,endCondition:game.endCondition??'manual',limit:String(game.endCondition==='rounds'?game.roundLimit??10:game.targetScore??100),targetEnd:game.targetEnd??'immediate'}}
 export function changeEditEnding(game:Game,draft:GameEditDraft,endCondition:GameEditDraft['endCondition']):GameEditDraft{return {...draft,endCondition,limit:endCondition===draft.endCondition?draft.limit:String(endCondition==='rounds'?Math.max(10,completedEditRounds(game)+1):Math.min(100000,Math.max(100,minimumEditTarget(game,draft.targetEnd))))}}
 export function gameEditAction(game:Game,draft:GameEditDraft):Action{
- if(draft.endCondition!=='manual'&&!/^\d+$/.test(draft.limit))throw new Error('Enter a positive whole-number limit.');
+ if(game.winner!=='zero'&&draft.endCondition!=='manual'&&!/^\d+$/.test(draft.limit))throw new Error('Enter a positive whole-number limit.');
  const rules:GameRuleEdit={name:draft.name,winner:draft.winner,endCondition:draft.endCondition,...(draft.endCondition==='rounds'?{roundLimit:Number(draft.limit)}:draft.endCondition==='target'?{targetScore:Number(draft.limit),targetEnd:draft.targetEnd}:{})};
  applyGameEdit(game,rules);return {action:'rules',rules};
 }

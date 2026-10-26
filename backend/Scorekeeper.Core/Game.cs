@@ -1,40 +1,44 @@
+using System.Text.Json.Serialization;
 namespace Scorekeeper.Core;
 public record Player(Guid Id, string Name);
 public record Entry(Guid Id, Guid PlayerId, int Points);
-public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null, DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null, string TargetEnd = "immediate");
+public record Game(Guid Id, string Name, Player[] Players, string Winner, Entry[] Entries, Guid Next, bool Finished, long Version, DateTimeOffset Updated, string EndCondition = "manual", int? RoundLimit = null, long? TargetScore = null, string? FinishReason = null, string PlayStyle = "turns", string ScoreMode = "add", string? PresetId = null, int? PresetVersion = null, DateTimeOffset? StartedAt = null, DateTimeOffset? EndedAt = null, string TargetEnd = "immediate", [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] long? StartingScore = null, [property:JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] bool? ExactZero = null);
 public record GameView(Game Game, Dictionary<Guid,long> Totals, Guid[] WinnerIds);
 public record GameRuleEdit(string Name,string Winner,string EndCondition,int? RoundLimit=null,long? TargetScore=null,string TargetEnd="immediate");
 public record Command(long ExpectedVersion, string Action, int? Points = null, Guid? PlayerId = null, Guid? EntryId = null,GameRuleEdit? Rules = null);
-public static class Scoring
+public static partial class Scoring
 {
- public static Game Create(Guid id, string name, string[] names, string winner, string endCondition = "manual", int? roundLimit = null, long? targetScore = null, string playStyle = "turns", string scoreMode = "add", string? presetId = null, int? presetVersion = null, string targetEnd = "immediate")
+ public static Game Create(Guid id, string name, string[] names, string winner, string endCondition = "manual", int? roundLimit = null, long? targetScore = null, string playStyle = "turns", string scoreMode = "add", string? presetId = null, int? presetVersion = null, string targetEnd = "immediate", long? startingScore = null, bool? exactZero = null)
  {
   if(names is null || names.Any(n=>n is null))throw new ArgumentException("Player names are required.");
   var players=names.Select(n=>new Player(Guid.NewGuid(),n.Trim())).ToArray();
   var now=DateTimeOffset.UtcNow;
-  var game=new Game(id,(name??"").Trim(),players,winner,[],players.FirstOrDefault()?.Id??Guid.Empty,false,1,now,endCondition,roundLimit,targetScore,null,playStyle,scoreMode,presetId,presetVersion,now,null,targetEnd);
+  var game=new Game(id,(name??"").Trim(),players,winner,[],players.FirstOrDefault()?.Id??Guid.Empty,false,1,now,endCondition,roundLimit,targetScore,null,playStyle,scoreMode,presetId,presetVersion,now,null,targetEnd,startingScore,exactZero);
   Validate(game);return game;
  }
  public static void Validate(Game g)
  {
   if(g.Players is null || g.Entries is null)throw new ArgumentException("Players and entries are required.");
   if(g.Id==Guid.Empty || string.IsNullOrWhiteSpace(g.Name) || g.Name.Length>60) throw new ArgumentException("Game name must contain 1–60 characters.");
-  if(g.Winner is not ("high" or "low")) throw new ArgumentException("Winner must be high or low.");
+  if(g.Winner is not ("high" or "low" or "zero")) throw new ArgumentException("Winner must be high, low or zero.");
   if(g.Players.Length is <2 or >20 || g.Players.Any(p=>p is null || p.Id==Guid.Empty || string.IsNullOrWhiteSpace(p.Name)||p.Name.Length>30)) throw new ArgumentException("Use 2–20 players with names of 1–30 characters.");
   if(g.Players.Select(p=>p.Id).Distinct().Count()!=g.Players.Length || g.Players.Select(p=>p.Name.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Count()!=g.Players.Length) throw new ArgumentException("Player IDs and names must be unique.");
-  if(g.PlayStyle is not ("turns" or "free") || g.ScoreMode is not ("add" or "total"))throw new ArgumentException("Invalid play style or score entry mode.");
+  if(g.PlayStyle is not ("turns" or "free") || g.ScoreMode is not ("add" or "total" or "subtract"))throw new ArgumentException("Invalid play style or score entry mode.");
   if(g.PresetId?.Length>60 || g.PresetVersion is <1)throw new ArgumentException("Invalid preset metadata.");
+  if(g.Winner=="zero"){
+   if(g.ScoreMode!="subtract"||g.EndCondition!="target"||g.TargetScore!=0||g.StartingScore is null or <1 or >100000)throw new ArgumentException("Reduce to 0 requires a starting number from 1 to 100,000, subtract scoring and a zero target.");
+  }else if(g.ScoreMode=="subtract"||g.StartingScore is not null||g.ExactZero is not null)throw new ArgumentException("Countdown rules require Reduce to 0.");
   if(g.EndCondition=="rounds" && g.PlayStyle=="free")throw new ArgumentException("Fixed rounds require turn-based play.");
   if(g.EndCondition is not ("manual" or "rounds" or "target"))throw new ArgumentException("Choose a valid ending rule.");
   if(g.EndCondition=="rounds" && (g.RoundLimit is null or <1 || (long)g.RoundLimit*g.Players.Length>10000))throw new ArgumentException("Use a positive round limit within 10000 turns.");
-  if(g.EndCondition=="target" && (g.TargetScore is null or <1 or >100000))throw new ArgumentException("Target score must be a whole number from 1 to 100,000.");
+  if(g.EndCondition=="target" && (g.TargetScore is null || g.TargetScore<(g.Winner=="zero"?0:1) || g.TargetScore>100000))throw new ArgumentException("Target score must be a whole number from 1 to 100,000.");
   if(g.TargetEnd is not ("immediate" or "round"))throw new ArgumentException("Choose a valid score-limit ending.");
   if(g.TargetEnd=="round" && (g.EndCondition!="target" || g.PlayStyle!="turns"))throw new ArgumentException("End of round requires a score limit and turn-based play.");
   if(g.FinishReason is not (null or "manual" or "rounds" or "target"))throw new ArgumentException("Invalid finish reason.");
   if(g.EndedAt is not null && !g.Finished)throw new ArgumentException("An active game cannot have an end time.");
   var ids=g.Players.Select(p=>p.Id).ToHashSet();
   if(!ids.Contains(g.Next)||g.Entries.Length>10000||g.Entries.Any(e=>e is null || e.Id==Guid.Empty||!ids.Contains(e.PlayerId)||Math.Abs((long)e.Points)>1000000)||g.Entries.Select(e=>e.Id).Distinct().Count()!=g.Entries.Length)throw new ArgumentException("Invalid score history or next player.");
-  if(g.Players.Any(p=>Total(g,p.Id)>100000))throw new ArgumentException("Player totals cannot exceed 100,000. Enter a smaller score.");
+  if(g.Winner=="zero"?Countdown(g).Scores.Values.Any(score=>score>100000):g.Players.Any(p=>Total(g,p.Id)>100000))throw new ArgumentException("Player totals cannot exceed 100,000. Enter a smaller score.");
  }
  public static Game Apply(Game g, Command c,Guid? newEntryId=null,DateTimeOffset? committedAt=null)
  {
@@ -76,6 +80,11 @@ public static class Scoring
  {
   if(g.Finished || !string.IsNullOrEmpty(g.PresetId) && g.PresetId!="custom")throw new ArgumentException("Only in-progress custom games can be edited.");
   if(rules is null)throw new ArgumentException("Choose the game rules to save.");
+  if((g.Winner=="zero")!=(rules.Winner=="zero"))throw new ArgumentException("The countdown winner type is fixed after starting. Start a new game to change it.");
+  if(g.Winner=="zero"){
+   if(rules.EndCondition!=g.EndCondition||rules.TargetScore!=0||rules.TargetEnd!=g.TargetEnd)throw new ArgumentException("Countdown scoring and ending rules are fixed after starting.");
+   var renamed=g with{Name=(rules.Name??"").Trim()};Validate(renamed);return renamed;
+  }
   var changed=g with{Name=(rules.Name??"").Trim(),Winner=rules.Winner,EndCondition=rules.EndCondition,RoundLimit=rules.EndCondition=="rounds"?rules.RoundLimit:null,TargetScore=rules.EndCondition=="target"?rules.TargetScore:null,TargetEnd=rules.EndCondition=="target"?rules.TargetEnd:"immediate"};
   Validate(changed);
   var endingChanged=changed.EndCondition!=g.EndCondition || changed.EndCondition=="rounds" && changed.RoundLimit!=g.RoundLimit || changed.EndCondition=="target" && (changed.TargetScore!=g.TargetScore || changed.TargetEnd!=g.TargetEnd);
@@ -85,11 +94,11 @@ public static class Scoring
   }
   return changed;
  }
- public static long Total(Game g,Guid playerId)=>g.ScoreMode=="total"?g.Entries.LastOrDefault(e=>e.PlayerId==playerId)?.Points??0:g.Entries.Where(e=>e.PlayerId==playerId).Sum(e=>(long)e.Points);
+ public static long Total(Game g,Guid playerId)=>g.Winner=="zero"?Countdown(g).Scores[playerId]:g.ScoreMode=="total"?g.Entries.LastOrDefault(e=>e.PlayerId==playerId)?.Points??0:g.Entries.Where(e=>e.PlayerId==playerId).Sum(e=>(long)e.Points);
  public static Game AutoEnd(Game g)
  {
   var finalRound=TargetEndRound(g);
-  var reached=g.EndCondition=="rounds" ? g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=g.RoundLimit : g.EndCondition=="target" && (g.TargetEnd=="round" ? finalRound is not null && g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=finalRound : g.Players.Any(p=>Total(g,p.Id)>=g.TargetScore));
+  var reached=g.EndCondition=="rounds" ? g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=g.RoundLimit : g.EndCondition=="target" && (g.TargetEnd=="round" ? finalRound is not null && g.Players.Min(p=>g.Entries.Count(e=>e.PlayerId==p.Id))>=finalRound : (g.Winner=="zero"?Countdown(g).FirstZero is not null:g.Players.Any(p=>Total(g,p.Id)>=g.TargetScore)));
   if(reached)return g with{Finished=true,FinishReason=g.EndCondition};
   if(RemainingTargetPlayers(g) is Player[] remaining && remaining.Length>0 && !remaining.Any(p=>p.Id==g.Next)){
    var start=Array.FindIndex(g.Players,p=>p.Id==g.Next);
@@ -100,6 +109,7 @@ public static class Scoring
  public static int? TargetEndRound(Game g)
  {
   if(g.EndCondition!="target" || g.TargetEnd!="round")return null;
+  if(g.Winner=="zero")return Countdown(g).Round;
   var scores=g.Players.ToDictionary(p=>p.Id,p=>0L);var counts=g.Players.ToDictionary(p=>p.Id,p=>0);
   foreach(var e in g.Entries){counts[e.PlayerId]++;scores[e.PlayerId]=g.ScoreMode=="total"?e.Points:scores[e.PlayerId]+e.Points;if(scores[e.PlayerId]>=g.TargetScore)return counts.Values.Max();}
   return null;
@@ -107,6 +117,9 @@ public static class Scoring
  public static Player[]? RemainingTargetPlayers(Game g){var round=TargetEndRound(g);return round is null?null:g.Players.Where(p=>g.Entries.Count(e=>e.PlayerId==p.Id)<round).ToArray();}
  public static GameView View(Game g)
  {
+  if(g.Winner=="zero"){
+   var countdown=Countdown(g);return new(g,countdown.Scores,g.Finished&&g.Entries.Length>0&&countdown.FirstZero is Guid first?[first]:[]);
+  }
   var totals=g.Players.ToDictionary(p=>p.Id,p=>Total(g,p.Id));
   var best=g.Winner=="high"?totals.Values.Max():totals.Values.Min();
   return new(g,totals,g.Finished && g.Entries.Length>0?g.Players.Where(p=>totals[p.Id]==best).Select(p=>p.Id).ToArray():[]);

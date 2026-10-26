@@ -30,7 +30,7 @@ function lifecycle(record:DocumentRecord|null):Lifecycle{
 /** Durable account state shared by IndexedDB and SQLite; no tokens or email keys. */
 export function createDurableAccountRepository(repository:ConfirmedGames,options:{coldWritesEnabled?:boolean;allowPendingWrites?:boolean}={}){
  const coldWritesEnabled=options.coldWritesEnabled===true,allowPendingWrites=coldWritesEnabled&&options.allowPendingWrites===true;
- const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),restoredRights=new WeakMap<object,string>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>(),imports=new WeakSet<object>(),creation=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
+ const documents:AtomicDocuments=repository.documents,issued=new WeakSet<object>(),restoredRights=new WeakMap<object,string>(),confirmed=new WeakSet<object>(),offlineWrites=new WeakSet<object>(),scoring=new WeakSet<object>(),completion=new WeakSet<object>(),corrections=new WeakSet<object>(),rules=new WeakSet<object>(),deletion=new WeakSet<object>(),imports=new WeakSet<object>(),creation=new WeakSet<object>(),countdown=new WeakSet<object>();let closed=false;const deliveries=new Map<{close:()=>void},DurableLease>();
  function stopDeliveries(proof?:DurableLease|VerificationTicket){
   clearGameReadCache(documents,proof?{key:KEY,revision:proof.revision}:undefined);
   for(const [worker,lease]of deliveries){
@@ -49,11 +49,11 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
  function localRights(proof:DurableLease,grant:OfflineWriteGrant){
   restoredRights.set(proof,canonical(grant));
   offlineWrites.add(proof);scoring.add(proof);
-  if(grant.creation)creation.add(proof);if(grant.completion)completion.add(proof);if(grant.corrections)corrections.add(proof);if(grant.rules)rules.add(proof);if(grant.deletion)deletion.add(proof);
+  if(grant.countdown)countdown.add(proof);if(grant.creation)creation.add(proof);if(grant.completion)completion.add(proof);if(grant.corrections)corrections.add(proof);if(grant.rules)rules.add(proof);if(grant.deletion)deletion.add(proof);
  }
  async function accept(proof:DurableLease|VerificationTicket,input:AccountStatus){
   const status=JSON.parse(JSON.stringify(input)) as AccountStatus;
-  const scoringSupported=supportsQueuedScoring(status.gameOperations),completionSupported=supportsQueuedCompletion(status.gameOperations),correctionsSupported=supportsQueuedCorrections(status.gameOperations),rulesSupported=supportsQueuedRules(status.gameOperations),deletionSupported=supportsQueuedDeletion(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);completion.delete(proof);corrections.delete(proof);rules.delete(proof);deletion.delete(proof);imports.delete(proof);creation.delete(proof);}
+  const scoringSupported=supportsQueuedScoring(status.gameOperations),completionSupported=supportsQueuedCompletion(status.gameOperations),correctionsSupported=supportsQueuedCorrections(status.gameOperations),rulesSupported=supportsQueuedRules(status.gameOperations),deletionSupported=supportsQueuedDeletion(status.gameOperations);check(proof);if(proof.kind==='account'){stopDeliveries(proof);confirmed.delete(proof);offlineWrites.delete(proof);scoring.delete(proof);completion.delete(proof);corrections.delete(proof);rules.delete(proof);deletion.delete(proof);imports.delete(proof);creation.delete(proof);countdown.delete(proof);}
   const {record,state}=await current(proof),profileId=status.profileId;
   if(!nonempty(profileId)){
    // An incomplete response is not a verified revocation. Keep previously
@@ -65,10 +65,10 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
   if(expected&&expected!==profileId){await write(record!.revision,{...state,active:null,pending:null});throw new AccountAccessError('PROFILE_MISMATCH')}
   if(status.deletionStatus||state.blockedProfiles.includes(profileId)){await write(record!.revision,{...state,active:null,pending:null,blockedProfiles:[...new Set([...state.blockedProfiles,profileId])]});throw new AccountAccessError('ACCOUNT_DELETING')}
   const grant=coldWritesEnabled?verifiedOfflineGrant(proof.selector,status):undefined;
-  const active:Active={selector:proof.selector,profileId,...(grant?{offlineWriteGrant:grant}:{}),...(allowPendingWrites?{operationSupport:canonical({scoring:scoringSupported,completion:completionSupported,corrections:correctionsSupported,rules:rulesSupported,deletion:deletionSupported,imports:scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import')})}:{})};
+  const active:Active={selector:proof.selector,profileId,...(grant?{offlineWriteGrant:grant}:{}),...(allowPendingWrites?{operationSupport:canonical({...((status.scoringRulesVersion??0)>=4?{countdown:true}:{}),scoring:scoringSupported,completion:completionSupported,corrections:correctionsSupported,rules:rulesSupported,deletion:deletionSupported,imports:scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import')})}:{})};
   // Background verification of unchanged ownership/support must not revoke
   // another tab's legitimate local write or rotate the lifecycle every pass.
-  const next=allowPendingWrites&&proof.kind==='account'&&canonical(state.active)===canonical(active)?record!:await write(record!.revision,{...state,pending:null,active}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);if(scoringSupported&&status.gameOperations?.kinds?.includes('create'))creation.add(lease);return lease;
+  const next=allowPendingWrites&&proof.kind==='account'&&canonical(state.active)===canonical(active)?record!:await write(record!.revision,{...state,pending:null,active}),lease=issue({kind:'account' as const,revision:next.revision,selector:proof.selector,profileId});confirmed.add(lease);offlineWrites.add(lease);if((status.scoringRulesVersion??0)>=4)countdown.add(lease);if(scoringSupported)scoring.add(lease);if(completionSupported)completion.add(lease);if(correctionsSupported)corrections.add(lease);if(rulesSupported)rules.add(lease);if(deletionSupported)deletion.add(lease);if(scoringSupported&&Array.isArray(status.gameOperations?.kinds)&&status.gameOperations.kinds.includes('import'))imports.add(lease);if(scoringSupported&&status.gameOperations?.kinds?.includes('create'))creation.add(lease);return lease;
  }
  async function withReview(proof:DurableLease,gameId:string,read:AccountGameRead):Promise<AccountGameRead>{
   const collision=await readGameCollision(documents,proof.profileId,gameId);await current(proof);
@@ -151,6 +151,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
    if(draft.status!=='reviewed'||draft.operation.operationId!==ticket.operationId||draft.sourceRaw!==ticket.sourceRaw)throw new OutboxError('NEEDS_REVIEW','Confirm the retained source before queueing it.');
    const indexKey=adoptionIndexKey(proof.profileId),indexRecord=await documents.read(indexKey),index=checkedAdoptionIndex(indexRecord?.value,proof.profileId);
    if(index.copies.find(c=>c.gameId===gameId)?.bytes!==adoptionReservation(draft))throw new LocalRepositoryError('STORAGE_CORRUPT','Retained adoption index and copy disagree.');
+   if(draft.operation.game?.winner==='zero'&&!countdown.has(proof))throw new OutboxError('CAPABILITY_REQUIRED','Reconnect to update account scoring support before adding this Reduce to 0 game.');
    const outbox=api.outbox(proof);
    // An acknowledged local admission must never be retargeted to a changed
    // source or new operation, including after restart, rejection or deletion.
@@ -170,6 +171,7 @@ export function createDurableAccountRepository(repository:ConfirmedGames,options
   async enqueueCreation(proof:DurableLease,input:import('../game-operation-contract').GameLifecycleOperation):Promise<AccountGameRead>{
    account(proof);const operation=JSON.parse(JSON.stringify(input)) as import('../game-operation-contract').GameLifecycleOperation;await current(proof);
    if(!coldWritesEnabled||!offlineWrites.has(proof)||!scoring.has(proof)||!creation.has(proof))throw new OutboxError('CAPABILITY_REQUIRED','Connect this account once with game creation support before starting an account game.');
+   if(operation.kind==='create'&&operation.game.winner==='zero'&&!countdown.has(proof))throw new OutboxError('CAPABILITY_REQUIRED','Reconnect to update account scoring support before starting a Reduce to 0 game. Your setup is kept.');
    if(operation.kind!=='create'||operation.game.entries.length!==0||operation.game.finished)throw new OutboxError('INVALID_OPERATION','Only a new empty game can be created here.');
    const outbox=api.outbox(proof);
    if(await outbox.hasOperation(operation))return api.readScoringGame(proof,operation.gameId);

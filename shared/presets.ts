@@ -1,6 +1,6 @@
 import type {Rules} from "./api";
 export type ScoringGuide={description:string;rows:readonly {label:string;points:number}[]};
-export type Preset={id:string;version:number;name:string;description:string;winner:"high"|"low";rules:Rules;scoringGuide?:ScoringGuide};
+export type Preset={id:string;version:number;name:string;description:string;winner:"high"|"low"|"zero";rules:Rules;scoringGuide?:ScoringGuide};
 // Presets supply defaults only. Games store a copy, never a live reference to the catalog.
 export const presets:readonly Preset[]=[
  {id:"custom",version:1,name:"Custom",description:"Choose your own play style, score entry, winner and ending rules.",winner:"high",rules:{playStyle:"turns",scoreMode:"add",endCondition:"manual"}},
@@ -9,4 +9,4 @@ export const presets:readonly Preset[]=[
 
 ];
 export function presetRules(p:Preset):Rules{return {...p.rules,presetId:p.id,presetVersion:p.version}}
-export function needsAdvancedRules(r:Rules,_winner?:"high"|"low"){return r.playStyle==="free"||r.scoreMode==="total"||(r.endCondition!==undefined&&r.endCondition!=="manual")}
+export function needsAdvancedRules(r:Rules,_winner?:"high"|"low"|"zero"){return r.playStyle==="free"||r.scoreMode==="total"||(r.endCondition!==undefined&&r.endCondition!=="manual")}
