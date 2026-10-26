@@ -74,6 +74,7 @@ jobs:
       - run: node scripts/test-msal-callback.mjs
       - run: node scripts/test-player-drag.mjs
       - run: node scripts/test-mobile-buttons.mjs
+      - run: node scripts/test-pinned-scorer.mjs
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
   mobile:
