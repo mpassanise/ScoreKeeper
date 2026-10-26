@@ -81,13 +81,18 @@ try{
   render('B',async()=>{callsB++;return 'done'});assert.equal(await controllers[0].options.run(new AbortController().signal,true),'cancelled');assert.equal(callsA+callsB,0);cleanups.forEach(fn=>fn?.());cleanups=pendingEffects.splice(0).map(fn=>fn());assert.equal(controllers[0].closed,true);assert.equal(await controllers[1].options.run(new AbortController().signal,false),'done');assert.equal(callsB,1);
   if(native){nativeState='background';listeners.get('change')('background');assert.equal(controllers[1].active.at(-1),false);nativeState='active';listeners.get('change')('active')}else{online=false;listeners.get('offline')();assert.equal(controllers[1].active.at(-1),false);online=true;listeners.get('online')();visibility='hidden';listeners.get('visibilitychange')();assert.equal(controllers[1].active.at(-1),false)}cleanups.forEach(fn=>fn?.());assert.equal(listeners.size,0);
  }
- // An uncertain local save retries its original IDs and cannot target a new profile.
+ // A lost local acknowledgement cannot block a different setup or cross accounts.
  {
-  const creator=createAccountGameCreator(randomUUID),scope={selector:'same-login',generation:1},seen=[];let profile='A';
-  const repository={creationProfile:async()=>profile,enqueueCreation:async(s,op,p)=>{seen.push({op,p});if(seen.length===1)throw Error('Lost local acknowledgement');return {kind:'game',view:gameView(op.game)}}};
+  const creator=createAccountGameCreator(randomUUID),scope={selector:'same-login',generation:1},seen=[];let profile='A',fail=true;
+  const repository={creationProfile:async()=>profile,enqueueCreation:async(s,op,p)=>{seen.push({op,p});if(fail){fail=false;throw Error('Lost local acknowledgement')}return {kind:'game',view:gameView(op.game)}}};
   await assert.rejects(creator.create(repository,scope,'Retry',['A','B'],'high',{}));
-  profile='B';await assert.rejects(creator.create(repository,scope,'Retry',['A','B'],'high',{}));assert.equal(seen.length,1);
-  profile='A';await creator.create(repository,scope,'Retry',['A','B'],'high',{});assert.deepEqual(seen[0],seen[1]);
+  await creator.create(repository,scope,'Different setup',['A','B'],'low',{});
+  assert.notEqual(seen[0].op.gameId,seen[1].op.gameId);
+  await creator.create(repository,scope,'Retry',['A','B'],'high',{});assert.deepEqual(seen[0],seen[2],'original uncertain request is retained');
+  fail=true;await assert.rejects(creator.create(repository,scope,'Account-bound',['A','B'],'high',{}));
+  profile='B';await creator.create(repository,scope,'Account-bound',['A','B'],'high',{});
+  assert.equal(seen[4].p,'B');assert.notEqual(seen[3].op.operationId,seen[4].op.operationId,'no request is transferred to another profile');
+  profile='A';await creator.create(repository,scope,'Account-bound',['A','B'],'high',{});assert.deepEqual(seen[3],seen[5]);
  }
  const cap={version:1,receipts:'retained',atomicGameAndReceipt:true,kinds:['action','delete'],actions:['score','select','finish','resume','undo','edit','rules']},status={profileId:'A',deletionStatus:null,deletionEnabled:true,gameOperations:cap};
  const factory=new IDBFactory(),file=path.join(root,'native.db');
