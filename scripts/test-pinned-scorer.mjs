@@ -7,11 +7,11 @@ const handlers=source.slice(source.indexOf(' function selectScorer('),source.ind
 assert.ok(handlers.includes('function finishGame()'));
 const code=ts.transpileModule(handlers,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 function fixture({draft='',...flags}={}){
- const game={id:'game-A',version:3,next:'one',finished:false,players:[{id:'one'},{id:'two'}]};
- const state={foregroundContext:{current:{view:{game},points:draft}},identityRevision:{current:1},locked:{current:false},busy:false,accountScoreReadOnly:false,accountCompletionReadOnly:false,pendingScoreSave:false,reordering:false,...flags};
+ const game={id:'game-A',version:3,next:'one',finished:false,entries:[{id:'entry-1',playerId:'one',points:25}],players:[{id:'one'},{id:'two'}]};
+ const state={foregroundContext:{current:{view:{game},points:draft}},identityRevision:{current:1},locked:{current:false},correctionState:{current:{blocked:false}},busy:false,accountScoreReadOnly:false,accountCompletionReadOnly:false,pendingScoreSave:false,reordering:false,...flags};
  const actions=[],alerts=[],errors=[];let homes=0;
  Object.assign(state,{Alert:{alert:(...args)=>alerts.push(args)},setPoints:p=>{state.foregroundContext.current.points=p},setError:e=>errors.push(e),action:async a=>actions.push(a),goHome:()=>homes++,remainingTargetPlayers:g=>g.eligible});
- const api=new Function('s',`with(s){${code};return {selectScorer,leaveGame,finishGame}}`)(state);
+ const api=new Function('s',`with(s){${code};return {selectScorer,leaveGame,finishGame,undoLastScore}}`)(state);
  return {state,game,actions,alerts,errors,api,homes:()=>homes,confirm:()=>alerts.at(-1)[2].at(-1).onPress()};
 }
 let f=fixture();f.api.selectScorer('two');assert.deepEqual(f.actions,[{action:'select',playerId:'two'}]);
@@ -27,6 +27,15 @@ f=fixture({draft:'27'});f.api.leaveGame();assert.equal(f.homes(),0);assert.equal
 f=fixture({draft:'27'});f.api.leaveGame();f.state.identityRevision.current++;f.confirm();assert.equal(f.homes(),0);assert.equal(f.state.foregroundContext.current.points,'27');
 f=fixture();f.api.leaveGame();assert.equal(f.homes(),1);
 console.log('Pinned scorer actual handlers: draft confirmation, selection/finish/navigation, final-round eligibility, disabled gates and stale account/game/draft callbacks passed.');
+
+// Undo must name the exact latest entry, confirm once, preserve drafts on cancel,
+// and reject stale authority/history even when an alert outlives its screen.
+f=fixture({draft:'27'});f.api.undoLastScore();assert.equal(f.actions.length,0);assert.ok(f.alerts[0][1].includes('25 points (turn 1)'));assert.ok(f.alerts[0][1].includes('Unadded points'));assert.equal(f.state.foregroundContext.current.points,'27');f.confirm();assert.deepEqual(f.actions,[{action:'undo'}]);assert.equal(f.state.foregroundContext.current.points,'');
+for(const change of [f=>f.state.identityRevision.current++,f=>f.state.foregroundContext.current.view={game:{...f.game,version:4}},f=>f.state.foregroundContext.current.view=null,f=>f.state.foregroundContext.current.view={game:{...f.game,id:'other'}},f=>f.state.foregroundContext.current.points='99',f=>f.state.locked.current=true,f=>f.state.correctionState.current.blocked=true,f=>f.state.foregroundContext.current.view={game:{...f.game,entries:[{id:'newer',points:40}]}}]){f=fixture({draft:'27'});f.api.undoLastScore();change(f);f.confirm();assert.equal(f.actions.length,0);assert.notEqual(f.state.foregroundContext.current.points,'')}
+f=fixture();f.game.entries=[];f.api.undoLastScore();assert.equal(f.alerts.length,0);
+f=fixture();f.state.correctionState.current.blocked=true;f.api.undoLastScore();assert.equal(f.alerts.length,0);
+f=fixture();f.game.scoreMode='total';f.game.finished=true;f.api.undoLastScore();assert.ok(f.alerts[0][1].includes('25 recorded total'));assert.ok(f.alerts[0][1].includes('game status'));f.confirm();assert.deepEqual(f.actions,[{action:'undo'}]);
+console.log('Undo confirmation: exact-entry summary, total/completed games, draft safety, empty/blocked state, and stale authority/version/history rejection passed.');
 
 // Render actual native component trees with host primitives, then exercise their
 // callbacks. Native safe-area geometry still needs acceptance on a real iPhone.
@@ -46,8 +55,8 @@ for(dark of [false,true]){
  hooks=[];let tree=render(Header,{game:{name:'Friday Scrabble',winner:'high'},signedIn:true});
  assert.deepEqual(nodes(tree,n=>n.type==='SafeAreaView')[0].props.edges,['top','left','right']);
  const title=nodes(tree,n=>n.props?.accessibilityRole==='header')[0];assert.equal(title.props.children,'Friday Scrabble');assert.equal(title.props.style.at(-1).color,dark?'#ffffff':'#17252a');
- hooks=[];tree=render(Toolbar,{busy:false,finished:false,disabled:false,onHome(){},onFinish(){},onNewGame(){}});assert.deepEqual(tree.props.edges,['bottom']);assert.equal(nodes(tree,n=>n.props?.accessibilityLabel==='Finish game').length,1);
- hooks=[];tree=render(Toolbar,{busy:false,finished:true,disabled:true});assert.equal(nodes(tree,n=>n.props?.accessibilityLabel==='Start a new game')[0].props.disabled,false,'Completed game can start a new game even if completion writes are unavailable');
+ hooks=[];tree=render(Toolbar,{busy:false,finished:false,disabled:false,undoDisabled:false,onHome(){},onFinish(){},onNewGame(){},onUndo(){},onHistory(){}});assert.deepEqual(tree.props.edges,['bottom']);assert.equal(nodes(tree,n=>n.props?.accessibilityLabel==='Finish game').length,1);assert.equal(nodes(tree,n=>n.type==='Pressable').length,4);assert.equal(nodes(tree,n=>n.props?.accessibilityLabel==='Score history')[0].props.disabled,false);
+ hooks=[];tree=render(Toolbar,{busy:false,finished:true,disabled:true});assert.equal(nodes(tree,n=>n.props?.accessibilityLabel==='+ New game')[0].props.disabled,false,'Completed game can start a new game even if completion writes are unavailable');
 }
 hooks=[];const players=Array.from({length:20},(_,i)=>({id:String(i),name:`Player ${i+1}`})),selected=[];
 let props={view:{game:{players,winner:'high'},totals:Object.fromEntries(players.map((p,i)=>[p.id,100-i]))},selectedId:'0',onSelect:id=>selected.push(id)};
@@ -59,3 +68,17 @@ props={...props,selectedId:'19'};tree=render(Standings,props);tree=render(Standi
 props={...props,disabled:true};tree=render(Standings,props);assert.ok(nodes(nodes(tree,n=>n.type==='ScrollView')[0],n=>n.type==='Pressable').every(n=>n.props.disabled));
 props={...props,disabled:false,isPlayerDisabled:id=>id==='1'};tree=render(Standings,props);assert.equal(nodes(nodes(tree,n=>n.type==='ScrollView')[0],n=>n.type==='Pressable')[1].props.disabled,true);
 console.log('Native component trees: safe-area edges, theme-specific title, completion toolbar, 20-player selection, chooser lifecycle, selected-pill scrolling and eligibility passed.');
+
+// Structural regression: history/editing share one native sheet and the tray
+// is outside vertical scrolling, so both actions remain reachable while scoring.
+const ast=ts.createSourceFile('App.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+let toolbarFound=false,historyFound=false;
+function visit(n,ancestors=[]){
+ if(ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GameToolbar'){toolbarFound=true;assert.ok(!ancestors.includes('ScrollView'),'Tray cannot move into scrolling body')}
+ if(ts.isJsxElement(n)){const tag=n.openingElement.tagName.getText(ast);if(tag==='SideDrawer'&&n.openingElement.attributes.getText(ast).includes('historyOpen')){historyFound=true;assert.ok(n.getText(ast).includes('setEdit(e.id)'));assert.ok(n.getText(ast).includes('Corrected points'));assert.ok(!n.getText(ast).includes('<Modal'))}ancestors=[...ancestors,tag]}
+ ts.forEachChild(n,c=>visit(c,ancestors));
+}
+visit(ast);assert.ok(toolbarFound&&historyFound);
+
+for(dark of [false,true]){hooks=[];const calls=[];const tree=render(Toolbar,{busy:false,finished:false,disabled:false,undoDisabled:true,onHome:()=>calls.push('home'),onFinish:()=>calls.push('finish'),onNewGame:()=>{},onUndo:()=>calls.push('undo'),onHistory:()=>calls.push('history')});const buttons=nodes(tree,n=>n.type==='Pressable');assert.equal(buttons[0].props.disabled,true);assert.equal(buttons[1].props.disabled,false,'History remains readable when undo is unavailable');for(const b of buttons)assert.ok(b.props.style[0].minHeight>=44);buttons[1].props.onPress();buttons[2].props.onPress();buttons[3].props.onPress();assert.deepEqual(calls,['history','home','finish'])}
+console.log('Pinned tray: four buttons, independent history/undo availability, action routing and minimum touch targets pass in both themes.');
