@@ -3,8 +3,8 @@ import {AppState,Pressable,StyleSheet,Text,View} from 'react-native';
 import {useGameTimer,timerDisplay} from '../shared/use-game-timer';
 import SideDrawer from './SideDrawer';
 import {useThemeStyles} from './Theme';
-export default function GameTimer({visible,onClose}:{visible:boolean;onClose:()=>void}){
- const timer=useGameTimer(),s=useThemeStyles(styles);
+export default function GameTimer({visible,onClose,timer}:{visible:boolean;onClose:()=>void;timer:ReturnType<typeof useGameTimer>}){
+ const s=useThemeStyles(styles);
  // Opening a hidden timer after suspension immediately rechecks its deadline.
  useEffect(()=>{const sub=AppState.addEventListener('change',state=>{if(state==='active')timer.refresh()});return()=>sub.remove()},[timer.refresh]);
  useEffect(()=>{if(visible)timer.refresh()},[visible]);
