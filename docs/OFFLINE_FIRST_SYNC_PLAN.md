@@ -697,3 +697,10 @@ PR 103 CI follow-up: both mobile failures were TS2307 resolving React from the s
 Moved web timer ownership into the header subtree so the closed timer can display its live countdown in place of the Timer icon without rerendering the scoring page on each tick. Desktop keeps the Timer label and tabular-width countdown; compact web layout exposes a countdown button beside the app menu. Clicking either reopens the same timer. Paused and completed timers remain visible until reset. Dialog and header share one timer; native behavior and sync/storage are unchanged.
 
 Validation: timer regression and web TypeScript/build; architect review checks shared timer ownership, no reset on panel dismissal/navigation, no duplicate countdown instances, and scoped rerenders. Browser visual acceptance remains outstanding. Next: verify header in light/dark and compact layouts after release.
+
+
+### Web navigation — consistent responsive icons
+
+Added matching Timer, Settings, Account and Sign-in icons to web header controls (Sync already has status-specific icons). One responsive navigation now keeps actions directly available at all widths: below 720px the words and account caret hide, leaving icon buttons with accessible labels and tooltips. Active countdown remains visible. Below 421px the brand wordmark hides while its logo/Home button remains accessible, preserving room for controls on narrow screens. Account dropdown items retain icons and descriptive text. Timer ownership and menu-close action sequencing are unchanged.
+
+Validation: timer/header regression, web TypeScript/build and diff checks. Architect review covers one timer instance, no duplicate responsive controls, accessible icon buttons and stable account action routing. Physical narrow-screen/theme visual acceptance remains outstanding. No API, persistence or iPhone changes. Next: verify compact web header after release.
