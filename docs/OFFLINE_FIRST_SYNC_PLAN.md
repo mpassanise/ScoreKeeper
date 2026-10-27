@@ -697,3 +697,10 @@ PR 103 CI follow-up: both mobile failures were TS2307 resolving React from the s
 Moved web timer ownership into the header subtree so the closed timer can display its live countdown in place of the Timer icon without rerendering the scoring page on each tick. Desktop keeps the Timer label and tabular-width countdown; compact web layout exposes a countdown button beside the app menu. Clicking either reopens the same timer. Paused and completed timers remain visible until reset. Dialog and header share one timer; native behavior and sync/storage are unchanged.
 
 Validation: timer regression and web TypeScript/build; architect review checks shared timer ownership, no reset on panel dismissal/navigation, no duplicate countdown instances, and scoped rerenders. Browser visual acceptance remains outstanding. Next: verify header in light/dark and compact layouts after release.
+
+
+### iPhone timer — nonblocking header countdown
+
+Added a compact countdown button within the existing safe-area header on Home and game screens when the timer panel is closed. Tapping reopens the same timer; paused/finished time stays visible until reset. A header wrapper owns one timer instance and its sheet, so clock ticks do not rerender score-entry state. Existing menus still open Timer. Theme-aware tint, tabular numerals, accessibility labels and a 44-point minimum target retain legibility without floating over content. No sync, API or storage changes.
+
+Validation: timer/header regression, native pinned action suite, isolated mobile TypeScript and iOS export. Architect review checks single clock ownership, foreground refresh, safe areas and menu sheet sequencing. Physical iPhone/Dynamic Type acceptance remains outstanding. Next: verify countdown header fit on device.
