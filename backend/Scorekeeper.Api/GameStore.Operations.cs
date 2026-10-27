@@ -41,7 +41,8 @@ public sealed partial class GameStore:IGameOperationStore
   await using var c=await Connect();if(!await OperationsReady(c))return null;
   return new{Version=1,Kinds=new[]{"action","create","import","delete"},Actions=new[]{"score","edit","undo","select","rules","finish","resume"},Receipts="retained",AtomicGameAndReceipt=true};
  }
- public async Task<T> Transaction<T>(string authenticatedOwner,Func<IGameOperationTransaction,Task<T>> work)
+ public Task<T> Transaction<T>(string authenticatedOwner,Func<IGameOperationTransaction,Task<T>> work)=>TransactionWithDevice(authenticatedOwner,null,work);
+ async Task<T> TransactionWithDevice<T>(string authenticatedOwner,Guid? device,Func<IGameOperationTransaction,Task<T>> work)
  {
   if(string.IsNullOrWhiteSpace(authenticatedOwner))throw new UnauthorizedAccessException();
   if(!gameOperationsEnabled)throw new GameOperationsUnavailableException();
@@ -49,11 +50,11 @@ public sealed partial class GameStore:IGameOperationStore
   await LockOwner(c,tx,authenticatedOwner);
   if(!await OperationsReady(c,tx))throw new GameOperationsUnavailableException();
   await Guard(c,tx,authenticatedOwner);
-  var result=await work(new SqlOperationTransaction(c,tx,authenticatedOwner));
+  var result=await work(new SqlOperationTransaction(c,tx,authenticatedOwner,device));
   await tx.CommitAsync(); // Never retry an uncertain commit under a new operation ID.
   return result;
  }
- sealed class SqlOperationTransaction(SqlConnection c,SqlTransaction tx,string owner):IGameOperationTransaction
+ sealed class SqlOperationTransaction(SqlConnection c,SqlTransaction tx,string owner,Guid? device):IGameOperationTransaction
  {
   readonly string key=OwnerKey(owner);
   SqlCommand Query(string sql){var q=c.CreateCommand();q.Transaction=tx;q.CommandText=sql;q.Parameters.Add("@key",SqlDbType.Char,64).Value=key;return q;}
@@ -70,6 +71,7 @@ public sealed partial class GameStore:IGameOperationStore
   }
   public async Task<OperationGame?> ReadGame(Guid gameId)
   {
+   await GuardScoring(c,tx,owner,gameId,device);
    await using var q=Query("SELECT Version,State FROM dbo.Games WITH(UPDLOCK,HOLDLOCK) WHERE OwnerId=@owner AND GameId=@id");q.Parameters.Add("@owner",SqlDbType.NVarChar,100).Value=owner;q.Parameters.Add("@id",SqlDbType.UniqueIdentifier).Value=gameId;
    await using var r=await q.ExecuteReaderAsync();if(!await r.ReadAsync())return null;var version=r.GetInt64(0);if(version<1||version>9_007_199_254_740_991L)throw new InvalidOperationException("Stored game version is invalid.");var raw=r.GetString(1);
    try{using var document=JsonDocument.Parse(raw);if(document.RootElement.TryGetProperty("deleted",out var deleted)&&deleted.ValueKind==JsonValueKind.True)return new(version,true,null);
@@ -92,6 +94,7 @@ public sealed partial class GameStore:IGameOperationStore
   }
   public async Task InsertGame(Game game)
   {
+   await GuardScoring(c,tx,owner,game.Id,device,true);
    await using var q=Query("INSERT dbo.Games(OwnerId,GameId,Version,Updated,State) VALUES(@owner,@id,@version,@updated,@state)");
    Parameters(q,owner,game);await q.ExecuteNonQueryAsync();await ReserveEntries(c,tx,owner,game.Id);
   }
