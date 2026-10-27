@@ -1,0 +1,4 @@
+import {configureScoringDevice} from '../../shared/scoring-device';
+configureScoringDevice({read:async key=>localStorage.getItem(key),write:async(key,value)=>{localStorage.setItem(key,value)},exclusive:async work=>navigator.locks?navigator.locks.request('scorekeeper-scoring-device',work):work()},()=>crypto.randomUUID());
+export function scoringForeground(refresh:()=>void){const visible=()=>{if(document.visibilityState==='visible')refresh()};window.addEventListener('focus',visible);document.addEventListener('visibilitychange',visible);window.addEventListener('online',visible);return()=>{window.removeEventListener('focus',visible);document.removeEventListener('visibilitychange',visible);window.removeEventListener('online',visible)}}
+export function scoringReachableHint(){return navigator.onLine&&document.visibilityState==='visible'}

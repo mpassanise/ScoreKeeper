@@ -54,7 +54,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
     await stage(name,s=>new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>{s.removeEventListener('abort',abort);resolve()},Math.min(5000,Math.floor(retryDelay*attempt*(0.75+Math.random()/2)))),abort=()=>{clearTimeout(timer);reject(new DeliveryFailure('DELIVERY_CANCELLED'))};s.addEventListener('abort',abort,{once:true});if(s.aborted)abort()}));
    }
   }
-  let review=false,confirmed=0,missingSnapshot=false,reviewCode:string|undefined;
+  let scoringElsewhere=false,review=false,confirmed=0,missingSnapshot=false,reviewCode:string|undefined;
   try{
    publish({phase:'connecting',stage:'account'});
    const session=await stage('account',s=>transport.open(s)),account=await retry('account',s=>session.account(s));
@@ -91,6 +91,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
      // Only known game-specific reconciliation failures are isolated. Identity,
      // authentication, protocol and storage failures still stop the whole pass.
      await check();
+     if(e instanceof ApiError&&e.code==='SCORING_ELSEWHERE'){scoringElsewhere=true;continue}
      if((e instanceof OutboxError&&e.code==='NEEDS_REVIEW')||(e instanceof LocalRepositoryError&&e.code==='VERSION_COLLISION')){
       review=true;reviewCode??=e.code;continue;
      }
@@ -98,7 +99,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
     }
    }
    const final=await stage('queue',()=>outbox.read()),pending=final.games.reduce((n,g)=>n+g.operations.length,0);review=review||final.games.some(g=>g.operations.some(i=>i.status==='rejected'));
-   return publish({phase:review?'needs-review':pending?'pending':'synced',pending,...(missingSnapshot?{code:'SNAPSHOT_UNAVAILABLE'}:reviewCode?{code:reviewCode}:{})});
+   return publish({phase:review?'needs-review':pending?'pending':'synced',pending,...(scoringElsewhere?{code:'SCORING_ELSEWHERE'}:missingSnapshot?{code:'SNAPSHOT_UNAVAILABLE'}:reviewCode?{code:reviewCode}:{})});
   }catch(e){
    const problem=fatal??e,phase=phaseFor(problem);let blockFailed=false;
    if(phase==='account-blocked'){

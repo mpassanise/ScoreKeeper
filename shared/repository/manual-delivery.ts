@@ -14,7 +14,7 @@ export function manualDeliveryText(state:Readonly<DeliveryState>|undefined):stri
   case 'connecting':case 'syncing':return 'Syncing saved changes in the background. You can keep using games on this device.';
   case 'retrying':return 'Retrying the same saved changes. You can keep using games on this device.';
   case 'synced':return 'Your games are up to date.';
-  case 'pending':return 'Changes are saved on this device and waiting to sync. Sync will retry automatically when connected.';
+  case 'pending':if(state.code==='SCORING_ELSEWHERE')return 'Scoring is on another device. Saved scores are kept here.';return 'Changes are saved on this device and waiting to sync. Sync will retry automatically when connected.';
   case 'needs-review':return 'Some saved game changes could not sync automatically. Your changes are safely saved here.';
   case 'sign-in-required':return 'Sign in to the same account to sync saved changes. Device copies are kept.';
   case 'account-blocked':return 'Account deletion is pending. Saved device copies have been kept.';
