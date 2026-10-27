@@ -76,6 +76,7 @@ jobs:
       - run: node scripts/test-player-drag.mjs
       - run: node scripts/test-mobile-buttons.mjs
       - run: node scripts/test-pinned-scorer.mjs
+      - run: node scripts/test-game-timer.mjs
       - run: pnpm exec tsc --noEmit
       - run: pnpm build
   mobile:

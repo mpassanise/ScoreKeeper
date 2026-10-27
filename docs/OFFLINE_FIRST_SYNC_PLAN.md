@@ -678,3 +678,12 @@ Validation: automatic-sync regression covers changed setup after lost acknowledg
 Diagnosed retained rejected delete operations with GAME_DELETED receipts as the source of the persistent account sync warning. Delivery now archives a final delete rejected because the server already holds a tombstone, retaining original bytes, receipts and before-delete recovery data. The next sync handles existing stored rejections and newly received receipts without manual conflict selection. Other rejections, unknown outcomes and contradictory snapshots remain protected. Removed unsupported other-device attribution from shared sync messages.
 
 Validation: real IndexedDB/SQLite delivery regressions cover new and previously stored rejections, exact retained evidence, persistent tombstones and no retransmission. Architect review checks account authorization, atomic guarded save, duplicate prevention, recovery preservation and web/mobile parity. Physical device acceptance remains outstanding. Next: verify the existing browser queue settles after release and sync. No API or schema migration needed.
+
+
+### Local game timer and compact iPhone action tray
+
+Added a local 30/60-second timer to both clients with start, pause/resume, reset and completion state. Native app/game menus open the same timer; web exposes Timer in desktop header and compact menu, including guest mode. Timer remains mounted across game navigation and panel dismissal. Deadline-based calculation and foreground refresh handle background throttling without extending duration. Timer is session-only and does not provide background alarms or notifications.
+
+The native game tray is now one row: Home, Undo, History, Finish (New game after completion), with bundled line icons, short visible labels, full accessibility labels, themed tint and safe-area padding. Existing undo/finish confirmation handlers and write gates remain unchanged. No new native dependencies or sync/API changes.
+
+Validation: timer fake-clock regression, pinned-scorer interaction/theme suite, web/mobile TypeScript and web production build. Architect review covers isolation from game state, interval cleanup, theme contrast, menu dismissal before native sheet presentation and preserved action gating. Browser pixel and physical iPhone/Dynamic Type acceptance remain unverified. Next: verify tray fit and timer navigation on device.
