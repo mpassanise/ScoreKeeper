@@ -699,6 +699,11 @@ Moved web timer ownership into the header subtree so the closed timer can displa
 Validation: timer regression and web TypeScript/build; architect review checks shared timer ownership, no reset on panel dismissal/navigation, no duplicate countdown instances, and scoped rerenders. Browser visual acceptance remains outstanding. Next: verify header in light/dark and compact layouts after release.
 
 
+### Web navigation — consistent responsive icons
+
+Added matching Timer, Settings, Account and Sign-in icons to web header controls (Sync already has status-specific icons). One responsive navigation now keeps actions directly available at all widths: below 720px the words and account caret hide, leaving icon buttons with accessible labels and tooltips. Active countdown remains visible. Below 421px the brand wordmark hides while its logo/Home button remains accessible, preserving room for controls on narrow screens. Account dropdown items retain icons and descriptive text. Timer ownership and menu-close action sequencing are unchanged.
+
+Validation: timer/header regression, web TypeScript/build and diff checks. Architect review covers one timer instance, no duplicate responsive controls, accessible icon buttons and stable account action routing. Physical narrow-screen/theme visual acceptance remains outstanding. No API, persistence or iPhone changes. Next: verify compact web header after release.
 ### iPhone timer — nonblocking header countdown
 
 Added a compact countdown button within the existing safe-area header on Home and game screens when the timer panel is closed. Tapping reopens the same timer; paused/finished time stays visible until reset. A header wrapper owns one timer instance and its sheet, so clock ticks do not rerender score-entry state. Existing menus still open Timer. Theme-aware tint, tabular numerals, accessibility labels and a 44-point minimum target retain legibility without floating over content. No sync, API or storage changes.
