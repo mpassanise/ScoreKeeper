@@ -75,6 +75,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
      if(current.tombstone)break;
      const head=current.operations.find(i=>i.status!=='applied');
      if(head?.status==='rejected'){
+      if(await stage('queue',()=>outbox.settleAlreadyDeleted(current.gameId)))break;
       review=true;
       if(head.acknowledgement?.errorCode!=='GAME_DELETED')await refreshGame(current.gameId);
       break;
@@ -84,7 +85,7 @@ export function createGameDelivery(outbox:Outbox,transport:DeliveryTransport,sco
      const wire=await stage('queue',()=>outbox.prepareDelivery(current.gameId,cap));if(wire===null)break;
      const op=operationFromWire(wire),acknowledgement=await retry('operation',async s=>{await outbox.assertDelivery(current.gameId);return session.operation(wire,s)});
      await stage('queue',()=>outbox.acknowledge(op.operationId,acknowledgement));confirmed++;changed=true;
-     if(acknowledgement.outcome==='rejected'){review=true;continue}
+     if(acknowledgement.outcome==='rejected'){continue}
      if(op.kind==='delete'){await stage('queue',()=>outbox.settle(current.gameId));break}
     }}catch(e){
      // Only known game-specific reconciliation failures are isolated. Identity,

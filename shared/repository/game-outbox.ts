@@ -257,6 +257,20 @@ export function createGameOutbox(documents:AtomicDocuments,access:OutboxAccess){
    // Commit the candidate separately before attempting compaction: a mismatch must keep both sources.
    await save(ctx,[guard]);const latest=await read('sync');return settle(latest,latest.state.games.find(g=>g.gameId===game.gameId)!);
   },
+  /** The user's delete intent is already satisfied by a retained server tombstone.
+   * Archive, rather than discard, the original request, receipt and device copy. */
+  async settleAlreadyDeleted(gameId:string){
+   const ctx=await read('sync'),game=ctx.state.games.find(g=>g.gameId===gameId);
+   if(!game||game.tombstone)return !!game?.tombstone;
+   const last=game.operations.at(-1),review=reviewOf(game,ctx.revision);
+   if(!last||last.status!=='rejected'||operationFromWire(last.wire).kind!=='delete'||last.acknowledgement?.errorCode!=='GAME_DELETED'||game.projection!==null||game.operations.slice(0,-1).some(i=>i.status!=='applied')||!review||!('deleted'in review.account))return false;
+   const guard=await collisionGuard(ctx.auth,gameId),operation=operationFromWire(last.wire);
+   // Like confirmed batches, this automatic archive uses the original operation
+   // ID as its stable marker. No replacement network operation is created.
+   ctx.state.archive.push({id:operation.operationId,gameId,kind:'account-selected',serverVersion:review.account.version,operations:game.operations,recovery:{base:game.base,projection:game.projection,reservedEntryIds:[...game.reservedEntryIds],...(game.beforeDelete?{beforeDelete:game.beforeDelete}:{})},selected:review.account});
+   game.operations=[];game.base=null;game.projection=null;game.tombstone={version:review.account.version};delete game.candidate;delete game.beforeDelete;
+   await save(ctx,[guard]);return true;
+  },
   async settle(gameId:string){const ctx=await read('sync'),game=ctx.state.games.find(g=>g.gameId===gameId);if(!game)throw new OutboxError('NEEDS_REVIEW','Unknown queued game.');return settle(ctx,game)},
   async readRecovery(gameId:string){const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);return {state:ctx.state,revision:ctx.revision,conflict:game?reviewOf(game,ctx.revision):null,read:game?gameRead(game):null}},
   async review(gameId:string):Promise<ConflictReview|null>{const ctx=await read(),game=ctx.state.games.find(g=>g.gameId===gameId);return game?reviewOf(game,ctx.revision):null},

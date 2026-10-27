@@ -671,3 +671,10 @@ Validation: native TypeScript, pinned-scorer and countdown component checks. Arc
 Fixed the shared web/iPhone creator retaining one failed request per login and blocking every subsequent edited setup. Pending requests are now isolated by verified profile and exact setup. A new setup can save independently; returning to an uncertain setup retries the original game/operation IDs. Existing durable outbox recovery and automatic delivery remain authoritative; no saved game is discarded or transferred across accounts.
 
 Validation: automatic-sync regression covers changed setup after lost acknowledgement, original-ID retry and profile isolation; countdown and web/mobile type checks. Architect review: no wire/storage changes, preserved idempotency and account guards. Pending intentions remain in memory as before; physical device acceptance remains to be verified. Next: exercise new-game creation after failed initial creation on iPhone and web.
+
+
+### Automatic settlement of already-deleted games
+
+Diagnosed retained rejected delete operations with GAME_DELETED receipts as the source of the persistent account sync warning. Delivery now archives a final delete rejected because the server already holds a tombstone, retaining original bytes, receipts and before-delete recovery data. The next sync handles existing stored rejections and newly received receipts without manual conflict selection. Other rejections, unknown outcomes and contradictory snapshots remain protected. Removed unsupported other-device attribution from shared sync messages.
+
+Validation: real IndexedDB/SQLite delivery regressions cover new and previously stored rejections, exact retained evidence, persistent tombstones and no retransmission. Architect review checks account authorization, atomic guarded save, duplicate prevention, recovery preservation and web/mobile parity. Physical device acceptance remains outstanding. Next: verify the existing browser queue settles after release and sync. No API or schema migration needed.
