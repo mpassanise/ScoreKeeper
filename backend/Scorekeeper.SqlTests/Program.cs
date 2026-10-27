@@ -114,6 +114,34 @@ try{
  await Reject<SqlException>(()=>Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[3])));
  await Sql(dbAdmin.ConnectionString,"UPDATE dbo.GameOperationSchema SET Version=99");Check(await store.OperationCapability() is null,"unknown schema fails closed");await Reject<GameOperationsUnavailableException>(()=>service.Execute(owner,wire));
  await Reject<SqlException>(()=>Sql(dbAdmin.ConnectionString,File.ReadAllText(migrations[4])));await Sql(dbAdmin.ConnectionString,"UPDATE dbo.GameOperationSchema SET Version=2");Check(first==await service.Execute(owner,wire),"failed migration preserves historical receipt");
+ // Single-device scoring control is additive and enforced inside the owner transaction.
+ await Sql(dbAdmin.ConnectionString,File.ReadAllText("backend/migrations/006_game_scoring_control.sql"));
+ await Sql(dbAdmin.ConnectionString,File.ReadAllText("backend/migrations/006_game_scoring_control.sql"));
+ var controlStore=Store();var controllerOwner="sql-controller";var deviceA=Guid.NewGuid();var deviceB=Guid.NewGuid();var deviceC=Guid.NewGuid();
+ var controlledGame=Scoring.Create(Guid.NewGuid(),"Controlled",["One","Two"],"high");
+ var createControl=JsonSerializer.Serialize(new LifecycleOperation(1,"create",Guid.NewGuid(),controlledGame.Id,0,controlledGame),GameStore.Json);
+ var serviceA=new GameOperationService(controlStore.ForScoringDevice(deviceA));var serviceB=new GameOperationService(controlStore.ForScoringDevice(deviceB));
+ var createdControl=await serviceA.Execute(controllerOwner,createControl);
+ Check(createdControl.Outcome=="applied"&&(await controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceA))!.CanScore,"creator has scoring control");
+ Check(!(await controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceB))!.CanScore,"other device is read-only");
+ var movedControl=await controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceB,1);
+ Check(movedControl is {CanScore:true,Epoch:2},"takeover moves control");
+ Check((await controlStore.Get(controllerOwner,controlledGame.Id))!.Version==1,"takeover does not mutate game revision or scoring");
+ await Reject<ScoringElsewhereException>(()=>serviceA.Execute(controllerOwner,Wire(Guid.NewGuid(),controlledGame)));
+ Check(await Count(dbApp.ConnectionString,"GameOperationReceipts",controllerOwner)==1,"blocked writer creates no terminal rejection receipt");
+ var scoredControl=await serviceB.Execute(controllerOwner,Wire(Guid.NewGuid(),controlledGame));Check(scoredControl.Outcome=="applied","new device scores");
+ Check(await serviceA.Execute(controllerOwner,createControl)==createdControl,"lost acknowledgement retries retain original receipt after takeover");
+ await Reject<ScoringElsewhereException>(()=>controlStore.Replace(controllerOwner,controlledGame with{Version=3},2));
+ await Reject<ScoringElsewhereException>(()=>controlStore.DeleteGame(controllerOwner,controlledGame.Id,2));
+ await Reject<ScoringControlChangedException>(()=>controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceA,1));
+ var takenBack=await controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceA,2);
+ Check(takenBack is {CanScore:true,Epoch:3}&&(await controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceA,2))!.Epoch==3,"lost takeover reply is idempotent");
+ async Task<bool> RaceClaim(Guid device){try{await controlStore.ScoringControl(controllerOwner,controlledGame.Id,device,3);return true;}catch(ScoringControlChangedException){return false;}}
+ var claims=await Task.WhenAll(RaceClaim(deviceB),RaceClaim(deviceC));Check(claims.Count(x=>x)==1,"concurrent takeovers choose only one device");
+ Check(await controlStore.ScoringControl("another-account",controlledGame.Id,deviceA,0) is null,"other account cannot read or claim control");
+ Check(await controlStore.ScoringControl(controllerOwner,Guid.NewGuid(),deviceA,0) is null,"claim cannot create or resurrect a missing game");
+ await controlStore.BeginDeletion(controllerOwner);await Reject<AccountDeletingException>(()=>controlStore.ScoringControl(controllerOwner,controlledGame.Id,deviceA,4));await controlStore.CompleteDeletion(controllerOwner);Check(await Count(dbApp.ConnectionString,"GameScoringControl",controllerOwner)==0,"account deletion removes device-control rows");
+ var unclaimed=Scoring.Create(Guid.NewGuid(),"Old client",["One","Two"],"high");Check(await controlStore.Insert("sql-unclaimed",unclaimed),"legacy creation remains unclaimed");Check((await new GameOperationService(controlStore).Execute("sql-unclaimed",Wire(Guid.NewGuid(),unclaimed))).Outcome=="applied","legacy scoring remains unchanged before claim");
  Console.WriteLine($"{checks} real SQL operation integration checks passed using the application database user.");
 }finally{
  SqlConnection.ClearAllPools();await Sql(admin.ConnectionString,$"IF DB_ID('{database}') IS NOT NULL BEGIN ALTER DATABASE [{database}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [{database}]; END; IF EXISTS(SELECT 1 FROM sys.sql_logins WHERE name='{login}') DROP LOGIN [{login}];");

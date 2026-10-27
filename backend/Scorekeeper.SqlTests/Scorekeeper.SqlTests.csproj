@@ -6,5 +6,5 @@
   <FrameworkReference Include="Microsoft.AspNetCore.App"/>
   <Compile Include="../Scorekeeper.Api/GameStore.cs" Link="GameStore.cs"/>
   <Compile Include="../Scorekeeper.Api/GameStore.Operations.cs" Link="GameStore.Operations.cs"/>
- </ItemGroup>
+ <Compile Include="../Scorekeeper.Api/GameStore.ScoringControl.cs" Link="GameStore.ScoringControl.cs"/></ItemGroup>
 </Project>
