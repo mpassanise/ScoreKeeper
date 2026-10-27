@@ -104,6 +104,10 @@ try{
    assert.deepEqual(retained.operations,before.operations);assert.deepEqual(retained.projection,before.projection);assert.equal(retained.base.serverVersion,1);if(!collision)assert.equal(retained.candidate.serverVersion,2);
    assert.equal(after.games.find(g=>g.gameId===healthy.id).operations.length,0);worker.close();
   }
+  // Ownership denial parks only that exact request, never a terminal rejection.
+  await verify('control');const held=await seed(),controlOther=await seed(),heldOp=score(held,1),otherOp=score(controlOther,1);await out.enqueue(heldOp);await out.enqueue(otherOp);serverGames.set(controlOther.id,structuredClone(controlOther));let denials=0;
+  const controlSession={...session,account:async()=>status('control'),operation:async(wire,signal)=>{if(JSON.parse(wire).gameId===held.id){denials++;throw new ApiError(423,'Scoring elsewhere','SCORING_ELSEWHERE')}return session.operation(wire,signal)}};
+  worker=access.delivery(lease,{open:async()=>controlSession},settings);const controlled=await worker.connect();assert.equal(controlled.phase,'pending');assert.equal(controlled.code,'SCORING_ELSEWHERE');assert.equal(denials,1);const heldRead=(await out.read()).games.find(g=>g.gameId===held.id);assert.equal(heldRead.operations[0].wire,JSON.stringify(heldOp));assert.equal(heldRead.operations[0].status,'uncertain');assert.equal(heldRead.operations[0].acknowledgement,undefined);assert.equal((await out.read()).games.find(g=>g.gameId===controlOther.id).operations.length,0);worker.close();
   // Storage failures still stop the pass rather than being mistaken for a game conflict.
   await verify('storage');const broken=await seed(),later=await seed();await out.enqueue(score(broken,1));await out.enqueue(score(later,1));let storagePosts=0;
   const saveDocument=repo.documents.write;repo.documents.write=async(key,...args)=>{if(key==='game-outbox:storage')throw new (require(path.join(root,'repository/confirmed-games.js')).LocalRepositoryError)('STORAGE_UNAVAILABLE','test storage failure');return saveDocument(key,...args)};

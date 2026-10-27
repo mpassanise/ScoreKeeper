@@ -1,3 +1,4 @@
+import {scoringDeviceId,scoringControlChanged} from './scoring-device';
 import type {OperationAcknowledgement} from './game-operation-contract';
 import type {GameOperationCapability} from './game-operation-contract';
 import {applyGameEdit} from './game-edit';
@@ -12,7 +13,8 @@ export type GameView={game:Game;totals:Record<string,number>;winnerIds:string[]}
 export type GameSummary=Pick<Game,"id"|"name"|"players"|"winner"|"finished"|"version"|"updated"|"startedAt"|"endedAt"|"deviceOnly"> & {turnCount:number};
 export type GameRuleEdit={name:string;winner:"high"|"low"|"zero";endCondition:"manual"|"rounds"|"target";roundLimit?:number;targetScore?:number;targetEnd?:"immediate"|"round"};
 export type Action={rules?:GameRuleEdit;action:"score"|"edit"|"select"|"undo"|"finish"|"resume"|"rules";points?:number;playerId?:string;entryId?:string};
-export type AccountStatus={gameOperations?:GameOperationCapability|null;gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
+export type ScoringControl={canScore:boolean;hasScorer:boolean;epoch:number};
+export type AccountStatus={scoringControlEnabled?:boolean;gameOperations?:GameOperationCapability|null;gameEditingEnabled?:boolean;profileId?:string;scoringRulesEnabled?:boolean;scoringRulesVersion?:number;deletionEnabled:boolean;deletionStatus:"pending"|"completed"|null};
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string,public requestId?:string){super(message)}}
 function cancelled(){return new ApiError(499,'Connection attempt cancelled.','REQUEST_CANCELLED')}
@@ -24,6 +26,8 @@ async function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T>{
 }
 export class ScorekeeperApi{
  constructor(private base:string,private token:()=>Promise<string>,private options:{signal?:AbortSignal;readAttempts?:number;readOnlyGames?:boolean}={}){if(!/^https:\/\//.test(base)&&!/^http:\/\/localhost(?::\d+)?(?:\/|$)/.test(base))throw new Error("Use HTTPS for the API.")}
+ guarded(isCurrent:()=>boolean){return new ScorekeeperApi(this.base,async()=>{if(!isCurrent())throw cancelled();const token=await this.token();if(!isCurrent())throw cancelled();return token},this.options)}
+ withSignal(signal:AbortSignal){return new ScorekeeperApi(this.base,this.token,{...this.options,signal,readAttempts:1})}
  private requireGameWrites(){if(this.options.readOnlyGames)throw new ApiError(423,'This account game is view-only. Start a new game to keep score on this device.','ACCOUNT_GAME_READ_ONLY')}
  // Token acquisition and API I/O have separate budgets. A cold Function/SQL
  // connection must not lose its entire budget to a silent token refresh.
@@ -32,9 +36,10 @@ export class ScorekeeperApi{
   try{return await Promise.race([this.token(),new Promise<string>((_,reject)=>{timer=setTimeout(()=>reject(new ApiError(408,'Sign-in token refresh timed out. Use Reconnect to try again.')),30000)})])}finally{clearTimeout(timer!)}
  }
  private async request<T>(path:string,body?:unknown,rawJson=false):Promise<T>{
-  if(body!==undefined&&(/^\/games(?:\/|$)/.test(path)||path==='/game-operations'))this.requireGameWrites();
+  if(body!==undefined&&!path.endsWith('/scoring-control')&&(/^\/games(?:\/|$)/.test(path)||path==='/game-operations'))this.requireGameWrites();
   const signal=this.options.signal;if(signal?.aborted)throw cancelled();
   const accessToken=await abortable(this.accessToken(),signal),read=body===undefined;
+  const device=(/^\/games(?:\/|$)/.test(path)||path==='/game-operations')&&(!read||path.endsWith('/scoring-control'))?await abortable(scoringDeviceId(),signal):undefined;
   const attempts=read?Math.max(1,Math.min(3,this.options.readAttempts??3)):1;
   // Retry only safe reads. A timed-out write may already have committed.
   for(let attempt=0;attempt<attempts;attempt++){
@@ -42,10 +47,11 @@ export class ScorekeeperApi{
    const controller=new AbortController(),started=Date.now(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});let timer:ReturnType<typeof setTimeout>;
    try{
     const work=async()=>{
-     const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},body:read?undefined:rawJson?body as string:JSON.stringify(body),signal:controller.signal});
+     const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json",...(device?{"X-Scorekeeper-Device":device}:{})},body:read?undefined:rawJson?body as string:JSON.stringify(body),signal:controller.signal});
      const value:unknown=await response.json().catch(()=>null);
      if(!response.ok){
       const data=value&&typeof value==="object"?value as Record<string,unknown>:{};
+      if(data.code==='SCORING_ELSEWHERE'){let id=path.match(/^\/games\/([^/]+)/)?.[1];if(path==='/game-operations')try{id=JSON.parse(body as string).gameId}catch{}if(id)scoringControlChanged(id)}
       const message=typeof data.error==="string"?data.error:"Request failed.";
       const details=[`${read?'GET':'POST'} ${path.replace(/\/games\/[^/]+/, '/games/:id')}`,`HTTP ${response.status}`,`attempt ${attempt+1}`,`${Date.now()-started} ms`,typeof data.code==='string'?data.code:'',typeof data.stage==='string'?`stage=${data.stage}`:'',typeof data.sqlNumber==='number'?`SQL ${data.sqlNumber}`:''].filter(Boolean).join(' · ');
       const reference=typeof data.requestId==="string"?` Reference: ${data.requestId}.`:"";
@@ -71,6 +77,8 @@ export class ScorekeeperApi{
  account(){return this.request<AccountStatus>("/account")}
  deleteAccount(confirmation:string){return this.request<AccountDeletion>("/account/delete",{confirmation})}
  list(){return this.request<GameSummary[]>("/games")}
+ scoringControl(id:string){return this.request<ScoringControl>(`/games/${encodeURIComponent(id)}/scoring-control`)}
+ takeScoringControl(id:string,expectedEpoch:number){return this.request<ScoringControl>(`/games/${encodeURIComponent(id)}/scoring-control`,{expectedEpoch})}
  get(id:string){return this.request<GameView>(`/games/${encodeURIComponent(id)}`)}
  async deleteGame(game:Pick<Game,'id'|'version'>){this.requireGameWrites();try{return await this.request<{deleted:boolean}>(`/games/${encodeURIComponent(game.id)}/delete`,{expectedVersion:game.version})}catch(e){if(e instanceof ApiError&&e.status===404)throw new Error('Game deletion requires the latest API deployment. Your game has been kept.');throw e}}
  create(id:string,name:string,players:string[],winner:"high"|"low"|"zero",rules:Rules={}){this.requireGameWrites();validateTargetScore(rules);validateTargetEnding(rules);const save=()=>this.request<GameView>("/games",{id,name,players,winner,...rules});return winner==='zero'?this.requireCountdown().then(save):rules.targetEnd==="round"?this.requireRoundEnding(rules).then(save):save()}
