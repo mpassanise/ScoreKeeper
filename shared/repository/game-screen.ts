@@ -32,7 +32,7 @@ export function gameScreenMessage(read:AccountGameRead|null):{title:string;detai
  if(read?.kind==='game'&&read.scoreAccess==='paused'&&read.sync==='pending')return {title:'Save confirmation pending',detail:'Reconnect to check the last save before entering more scores. Existing changes stay on this device.'};
  if(read?.kind==='deleted')return {title:'Game deleted',detail:'The confirmed deletion is saved on this device.'};
  if(read?.kind==='pending-delete')return {title:read.sync==='needs-review'?'Deletion needs review':'Deletion pending',detail:'This game stays hidden while its account deletion is unresolved. Your saved changes have been kept.'};
- if(read?.kind==='game'&&read.sync==='needs-review')return {title:'This game needs attention',detail:'This game changed on another device. Resolve the sync issue to continue. Your changes are safely saved here.'};
+ if(read?.kind==='game'&&read.sync==='needs-review')return {title:'This game needs attention',detail:'This game could not sync automatically. Your changes are safely saved here. Resolve the sync issue to continue.'};
  if(read?.kind==='game'&&read.scoreAccess==='paused')return {title:'Score entry paused',detail:'Reconnect to load the latest saved state before entering scores. Your input has been kept.'};
  if(read?.kind==='game'&&read.sync==='pending')return {title:'Changes saved on this device',detail:'Account confirmation is pending. You can review these scores while reconnecting.'};
  return {title:'Saved copy · view only',detail:'You can review this account game. Start a new game to keep score on this device.'};
