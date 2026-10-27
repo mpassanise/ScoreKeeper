@@ -1,0 +1,13 @@
+import {useEffect} from 'react';
+import {AppState,Pressable,StyleSheet,Text,View} from 'react-native';
+import {useGameTimer,timerDisplay} from '../shared/use-game-timer';
+import SideDrawer from './SideDrawer';
+import {useThemeStyles} from './Theme';
+export default function GameTimer({visible,onClose}:{visible:boolean;onClose:()=>void}){
+ const timer=useGameTimer(),s=useThemeStyles(styles);
+ // Opening a hidden timer after suspension immediately rechecks its deadline.
+ useEffect(()=>{const sub=AppState.addEventListener('change',state=>{if(state==='active')timer.refresh()});return()=>sub.remove()},[timer.refresh]);
+ useEffect(()=>{if(visible)timer.refresh()},[visible]);
+ return <SideDrawer visible={visible} title="Timer" onClose={onClose}><Text style={s.copy}>A quick timer for any game.</Text><View style={s.row}>{([30,60] as const).map(value=><Pressable key={value} accessibilityRole="button" accessibilityState={{selected:timer.duration===value}} accessibilityLabel={`${value} seconds; resets timer`} onPress={()=>timer.choose(value)} style={[s.option,timer.duration===value&&s.selected]}><Text style={s.optionText}>{value} seconds</Text></Pressable>)}</View><Text style={s.clock} accessibilityLabel={`${timer.seconds} seconds remaining`}>{timerDisplay(timer.seconds)}</Text><Text accessibilityLiveRegion="polite" style={s.status}>{timer.finished?'Time’s up!':timer.running?'Timer running':timer.seconds===timer.duration?'Ready when you are':'Paused'}</Text><View style={s.row}><Pressable accessibilityRole="button" onPress={timer.toggle} style={[s.option,s.primary]}><Text style={s.startText}>{timer.running?'Pause':timer.finished?'Start again':timer.seconds===timer.duration?'Start':'Resume'}</Text></Pressable><Pressable accessibilityRole="button" onPress={timer.reset} style={s.option}><Text style={s.optionText}>Reset</Text></Pressable></View><Text style={s.copy}>Keeps time when closed. No background alarm or notification.</Text></SideDrawer>
+}
+const styles=StyleSheet.create({row:{flexDirection:'row',gap:10},option:{flex:1,minHeight:48,padding:12,alignItems:'center',justifyContent:'center',borderWidth:1,borderColor:'#ccdadd',borderRadius:12,backgroundColor:'white'},selected:{backgroundColor:'#edf8f5',borderColor:'#2a8288',borderWidth:2},optionText:{color:'#226b73',fontSize:16,fontWeight:'600'},primary:{backgroundColor:'#d4e965',borderColor:'#d4e965'},startText:{color:'#123f4a',fontSize:16,fontWeight:'700'},clock:{color:'#17252a',fontSize:72,fontWeight:'700',fontVariant:['tabular-nums'],textAlign:'center'},status:{color:'#226b73',fontSize:18,fontWeight:'600',textAlign:'center'},copy:{color:'#62777d',fontSize:14,lineHeight:21}});
