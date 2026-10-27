@@ -690,3 +690,10 @@ Validation: timer fake-clock regression, pinned-scorer interaction/theme suite, 
 
 
 PR 103 CI follow-up: both mobile failures were TS2307 resolving React from the shared timer hook when only mobile dependencies were installed. Native TypeScript now resolves React types from mobile, and Metro resolves shared imports through mobile dependencies to avoid accidentally using a second web React installation. Verified native typecheck and iOS export with the checkout root node_modules absent. Architect review: build resolution only; timer behavior and sync/storage unchanged.
+
+
+### Web timer — header countdown
+
+Moved web timer ownership into the header subtree so the closed timer can display its live countdown in place of the Timer icon without rerendering the scoring page on each tick. Desktop keeps the Timer label and tabular-width countdown; compact web layout exposes a countdown button beside the app menu. Clicking either reopens the same timer. Paused and completed timers remain visible until reset. Dialog and header share one timer; native behavior and sync/storage are unchanged.
+
+Validation: timer regression and web TypeScript/build; architect review checks shared timer ownership, no reset on panel dismissal/navigation, no duplicate countdown instances, and scoped rerenders. Browser visual acceptance remains outstanding. Next: verify header in light/dark and compact layouts after release.
