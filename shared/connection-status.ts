@@ -31,12 +31,12 @@ function diagnostic(error:unknown,attempt:string,stage:ConnectionStage,started:n
  return {attempt,stage:error instanceof StepError?error.stage:stage,code:typeof code==='string'&&safeCodes.has(code)?code:source instanceof TypeError?'NETWORK_ERROR':'UNCLASSIFIED_ERROR',elapsedMs:Math.max(0,Date.now()-started),...(status!==undefined?{httpStatus:status}:{}),...(requestId?{requestId}:{})};
 }
 export function connectionText(state:ConnectionState){switch(state.status){
- case 'connecting':return state.slow?'Still connecting to your account…':'Connecting to your account…';
- case 'connected':return state.delivery?.phase==='needs-review'?'Account connected · sync needs attention':state.delivery?.phase==='pending'?'Account connected · changes waiting':'Account connected';
- case 'offline':return 'Offline · account sync unavailable';
- case 'sign-in':return 'Sign in to reconnect your account';
- case 'unavailable':return 'Account sync unavailable';
- default:return 'Account connection not checked';
+ case 'connecting':return state.slow?'Still checking your account…':'Checking your account…';
+ case 'connected':return state.delivery?.phase==='needs-review'?'Connected · changes need attention':state.delivery?.phase==='pending'?'Connected · changes waiting':'Connected';
+ case 'offline':return 'Offline';
+ case 'sign-in':return 'Sign in required';
+ case 'unavailable':return 'Can’t reach your account';
+ default:return 'Account status not checked';
 }}
 export function connectionFailureText(stage:ConnectionStage){
  return {authentication:'Sign-in could not finish.',account:'Account settings could not be loaded.',games:'Saved games could not be loaded.',game:'The open game could not be refreshed.',players:'Frequent players could not be synced.',imports:'Local import checks could not finish.',device:'Saved device data could not be read.',delivery:'Saved game changes could not be synced. Device copies have been kept.',unknown:'The connection could not be completed.'}[stage];

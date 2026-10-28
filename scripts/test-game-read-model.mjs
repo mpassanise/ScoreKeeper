@@ -84,7 +84,7 @@ try{
   let fetches=0;const neverFetch=async()=>{fetches++;throw Error('retained game must not need network')};
   assert.equal((await openGameScreen(pilot,scope,g.id,neverFetch)).view.game.entries.length,2);
   assert.equal((await openGameScreen(pilot,scope,deleted.id,neverFetch)).kind,'deleted');assert.equal((await observeGameScreen(pilot,scope,deleted.id,gameView(deleted))).kind,'deleted','late live GET cannot resurrect a settled deletion');assert.equal(fetches,0);
-  const retainedMismatch=await observeGameScreen(pilot,scope,mismatch.id,gameView({...mismatch,version:2}));assert.equal(retainedMismatch.sync,'needs-review');assert.equal(retainedMismatch.view.game.entries.length,1);assert.equal(gameScreenMessage(retainedMismatch).title,'This game needs attention');assert.equal(showGameSyncNotice(retainedMismatch),true);
+  const retainedMismatch=await observeGameScreen(pilot,scope,mismatch.id,gameView({...mismatch,version:2}));assert.equal(retainedMismatch.sync,'needs-review');assert.equal(retainedMismatch.view.game.entries.length,1);assert.equal(gameScreenMessage(retainedMismatch).title,'Saved changes need attention');assert.equal(showGameSyncNotice(retainedMismatch),true);
   const remote=base();const firstRemote=await openGameScreen(pilot,scope,remote.id,async()=>{fetches++;return gameView(remote)});assert.equal(firstRemote.kind,'game');assert.equal(fetches,1);await openGameScreen(pilot,scope,remote.id,neverFetch);assert.equal(fetches,1);
   await rejects(()=>openGameScreen(pilot,scope,randomUUID(),async()=>gameView(remote)),'INVALID_SNAPSHOT');
   // Same-version contradictions are durable review evidence for cache and queue.

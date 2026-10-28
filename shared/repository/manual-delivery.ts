@@ -14,11 +14,11 @@ export function manualDeliveryText(state:Readonly<DeliveryState>|undefined):stri
   case 'connecting':case 'syncing':return 'Syncing saved changes in the background. You can keep using games on this device.';
   case 'retrying':return 'Retrying the same saved changes. You can keep using games on this device.';
   case 'synced':return 'Your games are up to date.';
-  case 'pending':if(state.code==='SCORING_ELSEWHERE')return 'Scoring is on another device. Saved scores are kept here.';return 'Changes are saved on this device and waiting to sync. Sync will retry automatically when connected.';
-  case 'needs-review':return 'Some saved game changes could not sync automatically. Your changes are safely saved here.';
+  case 'pending':if(state.code==='SCORING_ELSEWHERE')return 'This game is being scored on another device. Changes on this device are kept until scoring is moved here.';return 'Changes are saved on this device and will update your account when connected.';
+  case 'needs-review':return 'Some changes could not reach your account. They are kept on this device; reconnect to review them.';
   case 'sign-in-required':return 'Sign in to the same account to sync saved changes. Device copies are kept.';
   case 'account-blocked':return 'Account deletion is pending. Saved device copies have been kept.';
-  case 'unavailable':return state.code==='CAPABILITY_REQUIRED'||state.code==='OPERATIONS_UNAVAILABLE'?'Account sync for saved changes is not available yet. Device copies have been kept.':'Saved changes could not be synced. Device copies are kept; try Reconnect.';
+  case 'unavailable':return state.code==='CAPABILITY_REQUIRED'||state.code==='OPERATIONS_UNAVAILABLE'?'Account sync for saved changes is not available yet. Device copies have been kept.':'Changes could not reach your account. They are kept on this device; try again when connected.';
   case 'cancelled':return 'Sync paused. Saved changes have been kept for the next connection.';
   default:return undefined;
  }

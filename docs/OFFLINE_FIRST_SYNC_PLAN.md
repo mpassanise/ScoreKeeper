@@ -764,3 +764,12 @@ Validation: actual setup component checks across narrow/phone/tablet widths and 
 - Validation: setup-row and keyboard-reveal behavior suites, mobile TypeScript and diff whitespace checks passed.
 - Software-architect review of the complete final diff: no unresolved findings. This iteration changes presentation only; account isolation, durable operations, IDs/receipts, replay, recovery and deletion behavior are unchanged. Existing theme color mapping is reused; no timer or sync rerenders were introduced.
 - Physical iPhone swipe/large-text/light-and-dark acceptance remains outstanding. No API or web deployment is required; next step is merge and an iPhone update.
+
+### Device handoff and offline-state language pass (2026-10-28)
+
+- Separated account status wording from game scoring access: the account panel is “Account status,” while game-level messages describe scoring readiness, offline saves, and handoff.
+- Standardized both web and iPhone connection labels around Connected, Offline, Sign in required, and Can’t reach your account. “Try again” is the recovery action when unreachable; “Sync now” remains for a connected account.
+- Clarified that offline scores remain on this device and update the account when connected. Handoff now says the game is being scored on another device, explains that moving scoring disables entry on the other device, and uses the existing “Score here” action.
+- Updated recovery/delivery messages to identify whether scores are saved locally, awaiting account confirmation, or need review, without changing queue or retry behavior.
+- Validation: game-read-model, manual-delivery (IndexedDB/SQLite and web/mobile shell), scoring-control tests; web and mobile TypeScript; diff whitespace checks passed. Architect review found copy-only changes; no account isolation, operation IDs/receipts, queue, duplicate, recovery or deletion logic changed.
+- Physical usability acceptance remains outstanding. Next: merge and test handoff/offline language in both themes and platforms; no API deployment required.

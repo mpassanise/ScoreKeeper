@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {ApiError,ScorekeeperApi,type ScoringControl} from './api';
 import {readScoringPermission,rememberScoringPermission,rememberScoringActivation,readScoringActivation,subscribeScoringControl} from './scoring-device';
-export const scoringControlCopy={title:'Scoring on another device',detail:'You can view this game here, or move scoring to this device.',button:'Score here',confirm:'Score on this device?',confirmation:'The other connected device will stop scoring this game.'};
+export const scoringControlCopy={title:'This game is being scored on another device',detail:'You can view scores here. Move scoring to this device to enter scores here; the other device will stop scoring this game.',button:'Score here',confirm:'Move scoring here?',confirmation:'The other device will no longer be able to enter scores for this game.'};
 type State={key:string;enabled:boolean;checking:boolean;canScore:boolean;hasScorer:boolean;epoch:number;working:boolean;error:string};
 const reachable=()=>true;
 const initial=(key:string):State=>({key,enabled:false,checking:!!key,canScore:true,hasScorer:false,epoch:0,working:false,error:''});
@@ -35,7 +35,7 @@ export function useScoringControl(owner:string|null,gameId:string|undefined,api:
   const timer=setInterval(()=>void refresh(),30000),unsubscribe=subscribeScoringControl(id=>{if(id===gameId){generation.current++;update({enabled:true,canScore:false,hasScorer:true,checking:false});void (activationPending.current?rememberScoringActivation(owner,gameId):rememberScoringPermission(owner,gameId,false)).catch(()=>{});void refresh()}}),foreground=onForeground(()=>void refresh());
   return()=>{active=false;lifecycle.current++;serial++;clearInterval(timer);unsubscribe();foreground();for(const controller of controllers)controller.abort()};
  },[key,onForeground,isAvailable]);
- function assertAllowed(){const now=latest.current;if(current.current!==key||now.key!==key||now.checking||now.working||!now.canScore)throw new ApiError(423,'Scoring is on another device. Choose Score here to continue.','SCORING_ELSEWHERE')}
+ function assertAllowed(){const now=latest.current;if(current.current!==key||now.key!==key||now.checking||now.working||!now.canScore)throw new ApiError(423,'This game is being scored on another device. Choose “Score here” to continue.','SCORING_ELSEWHERE')}
  async function verifyAllowed(){
   assertAllowed();const captured=latest.current,lease=lifecycle.current,requestGeneration=generation.current,valid=()=>current.current===key&&lifecycle.current===lease;
   if(!captured.enabled||!owner||!gameId||!isAvailable())return;
@@ -45,7 +45,7 @@ export function useScoringControl(owner:string|null,gameId:string|undefined,api:
    if(requestGeneration!==generation.current)throw new ApiError(423,'Scoring moved.','SCORING_ELSEWHERE');
    generation.current++;await rememberScoringPermission(owner,gameId,control.canScore);if(!valid())throw new ApiError(499,'Game changed.','REQUEST_CANCELLED');
    setState({...captured,...control,checking:false});
-   if(!control.canScore)throw new ApiError(423,'Scoring is on another device. Choose Score here to continue.','SCORING_ELSEWHERE');
+   if(!control.canScore)throw new ApiError(423,'This game is being scored on another device. Choose “Score here” to continue.','SCORING_ELSEWHERE');
   }catch(error){
    if(!valid())throw new ApiError(499,'Game changed.','REQUEST_CANCELLED');
    // Unreachable network keeps offline scoring available. Explicit denials and
@@ -65,7 +65,7 @@ export function useScoringControl(owner:string|null,gameId:string|undefined,api:
    await ready();if(!valid())return;
    await rememberScoringPermission(owner,gameId,true);if(!valid())return;
    activationPending.current=false;setState({...captured,...control,checking:false,working:false,error:''});
-  }catch(error){if(valid()){if(error instanceof ApiError&&[400,401,403,404,409,410].includes(error.status)){activationPending.current=false;await rememberScoringPermission(owner!,gameId!,false).catch(()=>{})}if(!valid())return;setState({...captured,working:false,error:(error as {code?:string})?.code==='SCORING_PENDING'?'Your saved scores are still waiting on this device. Connect again before moving scoring here.':error instanceof ApiError&&error.code==='SCORING_CONTROL_CHANGED'?'Scoring moved again. Please try Score here once more.':'Could not move scoring here. Please try again.'});}}finally{if(valid()){taking.current=false;refreshRef.current()}}
+  }catch(error){if(valid()){if(error instanceof ApiError&&[400,401,403,404,409,410].includes(error.status)){activationPending.current=false;await rememberScoringPermission(owner!,gameId!,false).catch(()=>{})}if(!valid())return;setState({...captured,working:false,error:(error as {code?:string})?.code==='SCORING_PENDING'?'Your saved scores are waiting to update your account. Reconnect before moving scoring here.':error instanceof ApiError&&error.code==='SCORING_CONTROL_CHANGED'?'Scoring moved again. Choose “Score here” to try again.':'Could not move scoring here. Try again.'});}}finally{if(valid()){taking.current=false;refreshRef.current()}}
  }
  return {...value,blocked:value.checking||value.working||!value.canScore,assertAllowed,verifyAllowed,take,refresh:()=>refreshRef.current()};
 }
