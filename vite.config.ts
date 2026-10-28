@@ -1,7 +1,8 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
+import { publicBuildConfig, publicBuildConfigKeys } from "./scripts/public-build-config.mjs";
 import { sites } from "./build/sites-vite-plugin";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
@@ -35,7 +36,21 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ mode }) => {
+  // Site variables exist at runtime, but browser auth configuration is compiled
+  // into the client bundle. Use explicit build variables when present and keep
+  // a public-only fallback so publishing without injected env cannot disable login.
+  const loadedEnvironment = loadEnv(mode, process.cwd(), "NEXT_PUBLIC_");
+  const publicEnvironment = publicBuildConfig({
+    ...loadedEnvironment,
+    ...process.env,
+  });
+  const publicEnvironmentDefines = Object.fromEntries(
+    publicBuildConfigKeys.map((key) => [
+      "process.env." + key,
+      JSON.stringify(publicEnvironment[key]),
+    ]),
+  );
   // Use Miniflare's local Request.cf placeholder unless fetching is requested.
   process.env.CLOUDFLARE_CF_FETCH_ENABLED ??= "false";
   process.env.WRANGLER_SEND_METRICS ??= "false";
@@ -51,6 +66,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: publicEnvironmentDefines,
     server: {
       ...(managedLinux ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] } : {}),
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
