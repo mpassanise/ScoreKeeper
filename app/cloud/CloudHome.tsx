@@ -151,7 +151,7 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
   const owner=identity.current;if(!owner||locked.current||accountBarrier.current)return false;
   if(manual&&gameDeliveryPilot&&!queued){const result=await (automaticSignal?manualSync.runAfter:manualSync.run)(owner,()=>canUseAccount(owner)&&!automaticSignal?.aborted,connection.whenIdle,()=>syncGames(true,true,automaticSignal,refreshReads));if(result&&!automaticSignal&&canUseAccount(owner))automatic.recovered();return result}
   connection.reset(owner);
-  return connection.connect(async(isCurrent,signal,step,reportDelivery)=>{
+  const synced=await connection.connect(async(isCurrent,signal,step,reportDelivery)=>{
    const valid=()=>mounted.current&&isCurrent()&&!automaticSignal?.aborted&&identity.current===owner&&!accountBarrier.current;
    if(!valid())return;
    const currentContext=context.current,revision=activity.current,draft=restoreGame.current;
@@ -213,6 +213,8 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
    const pending=await step('imports',()=>(gameScreenPilot?Promise.resolve([]):pendingImports(localApi,readApi,saved,valid)));if(!valid())return;setLocalCount(pending.length);
    const user=(await auth()).getActiveAccount();if(valid()&&user?.homeAccountId===owner&&status.profileId)try{localStorage.setItem('scorekeeper-player-profile:'+owner,status.profileId)}catch{}
   },automaticSignal);
+  if(synced)await scoringControl.refresh(true);
+  return synced;
  }
 
  async function enterGuest(){await run(async()=>{setGames(await localApi.list());setView(null);setGuest(true)})}
