@@ -736,3 +736,9 @@ Validation: existing pinned scorer/action suite with completed-state routing and
 ### iPhone header timer height
 
 Matched the closed timer countdown button to the 48-point sync and menu controls on Home and game headers. Kept the existing width, centered text, rounded corners, safe-area layout, light/dark colors and timer behavior. Validation: existing timer/header and pinned-scorer suites, mobile TypeScript and diff checks. Final architect review found no changes to state, timing, persistence, scoring or sync; no unresolved findings. Physical iPhone visual acceptance remains outstanding. Next: merge and update iPhone; no web/API deployment needed.
+
+### iPhone New Game screen chrome
+
+New Game now uses the same contextual header and pinned bottom-tray layout as scoring. The header displays New game using existing light/dark chrome colors; the scrolling setup no longer repeats the Home button and page title. The bottom tray contains only Home in its usual first position, owns the bottom safe area and respects the busy guard. Home dismisses the keyboard and uses existing navigation without clearing setup values. Sync/menu/countdown controls adopt the contextual theme without treating setup as a saved game. Keyboard-reveal behavior remains enabled.
+
+Validation: existing native component tests extended for both themes, setup-only tray routing/busy state and header/safe-area wiring; timer/context and keyboard-reveal suites; mobile TypeScript and local iOS export. Final architect review verifies no fake game identity, no scoring actions exposed in setup, no account/storage/queue/receipt changes, and unchanged scoring controls. Physical iPhone/Dynamic Type/keyboard acceptance remains outstanding. Next: merge and update iPhone; no web/API deployment needed.
