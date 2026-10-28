@@ -25,17 +25,17 @@ export async function openGameScreen(pilot:RepositoryPilot,scope:ReadScope|null,
  return observeGameScreen(pilot,scope,gameId,await fetchGame());
 }
 export function gameScreenMessage(read:AccountGameRead|null):{title:string;detail:string}{
- if(read?.kind==='game'&&read.view.game.finished&&(read.canChangeCompletion||read.canCorrectEntries))return {title:read.sync==='pending'?'Game finished on this device':'Game complete',detail:read.canCorrectEntries?'Your scores are kept. Correct an entry in history or undo the last score. Changes sync automatically when connected.':'Your scores are kept. Resume to continue scoring. Changes sync automatically when connected.'};
- if(read?.kind==='game'&&read.canScore)return {title:read.sync==='pending'?'Scores saved on this device':'Ready to keep score',detail:read.canEditRules?'Changes save on this device first. They sync automatically when connected.':read.canCorrectEntries?'Changes save here first. They sync automatically when connected. Game settings are view only.':'Scores save here first. They sync automatically when connected. Game settings and history are view only.'};
- if(read?.kind==='game'&&read.scoreAccess==='connect')return {title:'Saved copy · view only',detail:'Reconnect to verify account scoring support before entering scores. Your saved games and device games remain available.'};
- if(read?.kind==='game'&&read.scoreAccess==='untracked')return {title:'Saved copy · view only',detail:'Enable score entry to use this saved copy. Scores will save on this device first. They sync automatically when connected.'};
- if(read?.kind==='game'&&read.scoreAccess==='paused'&&read.sync==='pending')return {title:'Save confirmation pending',detail:'Reconnect to check the last save before entering more scores. Existing changes stay on this device.'};
- if(read?.kind==='deleted')return {title:'Game deleted',detail:'The confirmed deletion is saved on this device.'};
- if(read?.kind==='pending-delete')return {title:read.sync==='needs-review'?'Deletion needs review':'Deletion pending',detail:'This game stays hidden while its account deletion is unresolved. Your saved changes have been kept.'};
- if(read?.kind==='game'&&read.sync==='needs-review')return {title:'This game needs attention',detail:'This game could not sync automatically. Your changes are safely saved here. Resolve the sync issue to continue.'};
- if(read?.kind==='game'&&read.scoreAccess==='paused')return {title:'Score entry paused',detail:'Reconnect to load the latest saved state before entering scores. Your input has been kept.'};
- if(read?.kind==='game'&&read.sync==='pending')return {title:'Changes saved on this device',detail:'Account confirmation is pending. You can review these scores while reconnecting.'};
- return {title:'Saved copy · view only',detail:'You can review this account game. Start a new game to keep score on this device.'};
+ if(read?.kind==='game'&&read.view.game.finished&&(read.canChangeCompletion||read.canCorrectEntries))return {title:'Game complete',detail:read.canCorrectEntries?'Your scores are saved here. You can correct a turn in history or undo the last score. Changes update your account when connected.':'Your scores are saved here. Resume to keep playing. Changes update your account when connected.'};
+ if(read?.kind==='game'&&read.canScore)return {title:read.sync==='pending'?'Saved on this device':'Ready to score',detail:read.canEditRules?'Scores and changes save on this device first, then update your account when connected.':read.canCorrectEntries?'Scores save on this device first and update your account when connected. Game settings are view only.':'Scores save on this device first and update your account when connected. Game settings and history are view only.'};
+ if(read?.kind==='game'&&read.scoreAccess==='connect')return {title:'Reconnect to score',detail:'Reconnect to check whether this game can be scored on this device. Your saved games remain available.'};
+ if(read?.kind==='game'&&read.scoreAccess==='untracked')return {title:'Set up scoring on this device',detail:'Enable score entry to continue. Scores save on this device first and update your account when connected.'};
+ if(read?.kind==='game'&&read.scoreAccess==='paused'&&read.sync==='pending')return {title:'We couldn’t confirm the last save',detail:'Reconnect to check whether your last score reached your account. The saved changes on this device are kept.'};
+ if(read?.kind==='deleted')return {title:'Game deleted',detail:'The deletion is saved on this device.'};
+ if(read?.kind==='pending-delete')return {title:read.sync==='needs-review'?'Deletion needs attention':'Deletion waiting to update',detail:'This game stays hidden while its deletion is checked. Saved changes are kept.'};
+ if(read?.kind==='game'&&read.sync==='needs-review')return {title:'Saved changes need attention',detail:'Your changes are kept on this device. Reconnect to review them before continuing.'};
+ if(read?.kind==='game'&&read.scoreAccess==='paused')return {title:'Scoring paused',detail:'Reconnect to load the latest saved game before entering more scores. Your current input is kept.'};
+ if(read?.kind==='game'&&read.sync==='pending')return {title:'Saved on this device',detail:'Your changes will update your account when connected.'};
+ return {title:'View only',detail:'Reconnect to check this game, or start a new game to score on this device.'};
 }
 
 /** Routine saves stay quiet; only show help when the game needs user action. */

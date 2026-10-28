@@ -22,5 +22,5 @@ export async function assertScoringDevice(api:import('./api').ScorekeeperApi,own
  const previous=await readScoringPermission(owner,gameId);
  let allowed=previous;const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
  try{const source=api.withSignal(controller.signal);if((await source.account()).scoringControlEnabled){const control=await source.scoringControl(gameId);if(typeof control.canScore!=='boolean'||!Number.isSafeInteger(control.epoch))throw new Error('Invalid scoring permission.');allowed=control.canScore;await rememberScoringPermission(owner,gameId,allowed)}}catch(error){if(error&&typeof error==='object'&&'status'in error&&[401,403,404,410].includes(Number(error.status)))throw error}finally{clearTimeout(timer)}
- if(allowed===false)throw Object.assign(new Error('Scoring is on another device. Open the game and choose Score here before deleting it.'),{code:'SCORING_ELSEWHERE'});
+ if(allowed===false)throw Object.assign(new Error('This game is being scored on another device. Open it and choose “Score here” before deleting it.'),{code:'SCORING_ELSEWHERE'});
 }
