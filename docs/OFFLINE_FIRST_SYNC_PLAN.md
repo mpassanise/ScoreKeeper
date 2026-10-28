@@ -725,3 +725,8 @@ Validation and limitations are recorded in `SCORING_CONTROL_PLAN.md`. Next: conf
 Moved the primary + New Game button above the completed-game result card and moved Resume into the pinned bottom tray, using a play icon. Resume retains completion permissions and pending-save/reordering guards; New Game stays independent of those permissions. Existing theme colors, safe-area padding, touch targets and four-action tray are retained. No web, API, scoring or persistence behavior changes.
 
 Validation: existing pinned scorer/action suite with completed-state routing and disabled checks in both themes; mobile TypeScript and local iOS export. Final architect review confirms the original new-game and resume handlers are reused, completion authorization stays enforced, and saved data/operation identities/recovery remain untouched. Physical iPhone layout acceptance remains outstanding. Next: merge and update iPhone after checks pass; orphan-game work remains deferred at Mike's request.
+
+
+### iPhone header timer height
+
+Matched the closed timer countdown button to the 48-point sync and menu controls on Home and game headers. Kept the existing width, centered text, rounded corners, safe-area layout, light/dark colors and timer behavior. Validation: existing timer/header and pinned-scorer suites, mobile TypeScript and diff checks. Final architect review found no changes to state, timing, persistence, scoring or sync; no unresolved findings. Physical iPhone visual acceptance remains outstanding. Next: merge and update iPhone; no web/API deployment needed.
