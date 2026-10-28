@@ -11,26 +11,34 @@ export function useScoringControl(owner:string|null,gameId:string|undefined,api:
  const key=owner&&gameId?JSON.stringify([owner,gameId]):'',current=useRef(key);current.current=key;
  const apiRef=useRef(api);apiRef.current=api;
  const [state,setState]=useState(()=>initial(key));const value=state.key===key?state:initial(key),latest=useRef(value);latest.current=value;
- const refreshRef=useRef<()=>void>(()=>{}),generation=useRef(0),taking=useRef(false),activationPending=useRef(false),lifecycle=useRef(0);
+ const refreshRef=useRef<(blockUntilChecked?:boolean)=>Promise<void>>(async()=>{}),generation=useRef(0),taking=useRef(false),activationPending=useRef(false),lifecycle=useRef(0);
  useEffect(()=>{
   lifecycle.current++;generation.current++;taking.current=false;activationPending.current=false;
   if(!owner||!gameId){setState(initial(''));return}
-  let active=true,flight=false,serial=0;const controllers=new Set<AbortController>();
+  let active=true,flight:Promise<void>|null=null,serial=0;const controllers=new Set<AbortController>();
   const valid=()=>active&&current.current===key;
   const update=(next:Partial<State>)=>{if(valid())setState(previous=>({...((previous.key===key)?previous:initial(key)),...next}))};
-  async function refresh(){
-   if(!valid()||flight||taking.current)return;if(!isAvailable()){update({checking:false});return}flight=true;const requestGeneration=generation.current,version=++serial,controller=new AbortController();controllers.add(controller);
+  async function refresh(blockUntilChecked=false):Promise<void>{
+   if(!valid()||taking.current)return;
+   if(blockUntilChecked)update({checking:true});
+   if(flight){await flight;if(!valid()||taking.current)return;if(blockUntilChecked)update({checking:true})}
+   if(!isAvailable()){update({checking:false});return}
+   const requestGeneration=generation.current,version=++serial,controller=new AbortController();controllers.add(controller);
    const timer=setTimeout(()=>controller.abort(),5000);
-   try{
-    const source=apiRef.current.withSignal(controller.signal),account=await source.account();if(!valid())return;
-    if(requestGeneration!==generation.current)return;
-    if(!account.scoringControlEnabled){update({enabled:false,checking:false,canScore:true});return}
-    const control=await source.scoringControl(gameId!);if(!valid()||version!==serial||requestGeneration!==generation.current)return;
-    validate(control);if(!activationPending.current)await rememberScoringPermission(owner!,gameId!,control.canScore);if(!valid()||requestGeneration!==generation.current)return;
-    update({...control,canScore:control.canScore&&!activationPending.current,enabled:true,checking:false,...(control.canScore&&!activationPending.current?{error:''}:{})});
-   }catch{if(valid()&&!taking.current&&requestGeneration===generation.current)update({checking:false})}finally{clearTimeout(timer);controllers.delete(controller);flight=false}
+   const request=(async()=>{
+    try{
+     const source=apiRef.current.withSignal(controller.signal),account=await source.account();if(!valid())return;
+     if(requestGeneration!==generation.current)return;
+     if(!account.scoringControlEnabled){update({enabled:false,checking:false,canScore:true});return}
+     const control=await source.scoringControl(gameId!);if(!valid()||version!==serial||requestGeneration!==generation.current)return;
+     validate(control);if(!activationPending.current)await rememberScoringPermission(owner!,gameId!,control.canScore);if(!valid()||requestGeneration!==generation.current)return;
+     update({...control,canScore:control.canScore&&!activationPending.current,enabled:true,checking:false,...(control.canScore&&!activationPending.current?{error:''}:{})});
+    }catch{if(valid()&&!taking.current&&requestGeneration===generation.current)update({checking:false})}finally{clearTimeout(timer);controllers.delete(controller)}
+   })();
+   flight=request;
+   try{await request}finally{if(flight===request)flight=null}
   }
-  refreshRef.current=()=>{void refresh()};
+  refreshRef.current=refresh;
   void (async()=>{try{const saved=await readScoringPermission(owner,gameId),pending=await readScoringActivation(owner,gameId);if(valid())activationPending.current=pending;if(valid()&&saved!==undefined)update({enabled:true,checking:false,canScore:saved})}catch{}if(valid())void refresh()})();
   const timer=setInterval(()=>void refresh(),30000),unsubscribe=subscribeScoringControl(id=>{if(id===gameId){generation.current++;update({enabled:true,canScore:false,hasScorer:true,checking:false});void (activationPending.current?rememberScoringActivation(owner,gameId):rememberScoringPermission(owner,gameId,false)).catch(()=>{});void refresh()}}),foreground=onForeground(()=>void refresh());
   return()=>{active=false;lifecycle.current++;serial++;clearInterval(timer);unsubscribe();foreground();for(const controller of controllers)controller.abort()};
@@ -67,6 +75,6 @@ export function useScoringControl(owner:string|null,gameId:string|undefined,api:
    activationPending.current=false;setState({...captured,...control,checking:false,working:false,error:''});
   }catch(error){if(valid()){if(error instanceof ApiError&&[400,401,403,404,409,410].includes(error.status)){activationPending.current=false;await rememberScoringPermission(owner!,gameId!,false).catch(()=>{})}if(!valid())return;setState({...captured,working:false,error:(error as {code?:string})?.code==='SCORING_PENDING'?'Your saved scores are waiting to update your account. Reconnect before moving scoring here.':error instanceof ApiError&&error.code==='SCORING_CONTROL_CHANGED'?'Scoring moved again. Choose “Score here” to try again.':'Could not move scoring here. Try again.'});}}finally{if(valid()){taking.current=false;refreshRef.current()}}
  }
- return {...value,blocked:value.checking||value.working||!value.canScore,assertAllowed,verifyAllowed,take,refresh:()=>refreshRef.current()};
+ return {...value,blocked:value.checking||value.working||!value.canScore,assertAllowed,verifyAllowed,take,refresh:(blockUntilChecked=false)=>refreshRef.current(blockUntilChecked)};
 }
 function validate(value:ScoringControl){if(!value||typeof value.canScore!=='boolean'||typeof value.hasScorer!=='boolean'||!Number.isSafeInteger(value.epoch)||value.epoch<0)throw new Error('Invalid scoring control.')}
