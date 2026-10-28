@@ -1,9 +1,11 @@
 export const frequentPlayersKey='scorekeeper-frequent-players-v1';
+export const frequentPlayerPickerCopy={heading:'Frequent players',manage:'Manage',selectHint:'Tap a name to add it. Tap again to remove it.',emptyHint:'Save names in Settings to add players here.'} as const;
 export const playerKey=(name:string)=>name.trim().toLocaleLowerCase();
 export function cleanPlayerName(name:string){const value=name.trim();if(!value||value.length>30)throw new Error('Use a player name of 1–30 characters.');return value}
 export function parseFrequentPlayers(raw:string|null):string[]{if(raw===null)return [];const value:unknown=JSON.parse(raw);if(!Array.isArray(value)||value.length>50||value.some(name=>typeof name!=='string'))throw new Error('Saved players could not be read.');const names=value.map(cleanPlayerName);if(new Set(names.map(playerKey)).size!==names.length)throw new Error('Saved players contain duplicate names.');return names}
 export function savePlayer(names:readonly string[],name:string,original?:string):string[]{const cleaned=cleanPlayerName(name);if(names.some(n=>playerKey(n)===playerKey(cleaned)&&n!==original))throw new Error('That player is already in your frequent players.');if(original!==undefined){if(!names.includes(original))throw new Error('This player has changed. Try again.');return names.map(n=>n===original?cleaned:n)}if(names.length>=50)throw new Error('You can save up to 50 frequent players.');return [...names,cleaned]}
 export function pickPlayer(players:readonly string[],name:string):string[]{const cleaned=cleanPlayerName(name);if(players.some(n=>playerKey(n)===playerKey(cleaned)))return [...players];const empty=players.findIndex(n=>!n.trim());if(empty>=0)return players.map((n,i)=>i===empty?cleaned:n);if(players.length>=20)throw new Error('A game can have up to 20 players.');return [...players,cleaned]}
+export function togglePlayer(players:readonly string[],name:string):string[]{const index=players.findIndex(player=>playerKey(player)===playerKey(name));if(index<0)return pickPlayer(players,name);return players.map((player,i)=>i===index?'':player)}
 type Snapshot={names:readonly string[];ready:boolean;saving:boolean;error:string};
 type Storage={read:()=>Promise<string|null>;write:(value:string)=>Promise<void>};
 export function createFrequentPlayersStore(storage:Storage){
