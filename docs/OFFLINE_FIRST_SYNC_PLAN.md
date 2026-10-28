@@ -756,3 +756,11 @@ Validation: actual setup component checks across narrow/phone/tablet widths and 
 - iPhone already uses a stable Home / Undo / History / Finish-or-Resume bottom tray and confirms finishing. Its platform-native toolbar placement remains unchanged.
 - Validation: web TypeScript and diff whitespace checks passed. Software-architect review: confirmation uses existing scoring action and its permission/pending-save gates; no storage, receipt, operation identity, sync, replay, recovery or deletion semantics changed. No unresolved findings. Browser and physical-device usability acceptance remains outstanding.
 - Next: merge and test web finish confirmation plus iPhone cross-state toolbar behavior; no API deployment required.
+
+### iPhone setup scrolling discoverability (2026-10-27)
+
+- Added a compact, theme-aware “Swipe for more →” cue beside the preset and rule-group labels when additional choices exceed the normal two-card row. Larger accessibility sizing also exposes the cue for two-card rows that exceed the viewport.
+- Enabled the native horizontal scroll indicator explicitly. Preserved compact equal-height cards, one-line card text, horizontal gestures and all selection callbacks. Heading cues may wrap at large text sizes to avoid clipping.
+- Validation: setup-row and keyboard-reveal behavior suites, mobile TypeScript and diff whitespace checks passed.
+- Software-architect review of the complete final diff: no unresolved findings. This iteration changes presentation only; account isolation, durable operations, IDs/receipts, replay, recovery and deletion behavior are unchanged. Existing theme color mapping is reused; no timer or sync rerenders were introduced.
+- Physical iPhone swipe/large-text/light-and-dark acceptance remains outstanding. No API or web deployment is required; next step is merge and an iPhone update.
