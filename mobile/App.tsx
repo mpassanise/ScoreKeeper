@@ -217,7 +217,8 @@ function Scorekeeper(){
   connection.reset(String(identity));
   if(!background)setPullRefreshing(true);
   foregroundFlight.current=true;
-  try{return await connection.connect(async(isCurrent,signal,step,reportDelivery)=>{
+  try{
+   const synced=await connection.connect(async(isCurrent,signal,step,reportDelivery)=>{
    const valid=()=>mounted.current&&isCurrent()&&!automaticSignal?.aborted&&!!current.current&&identity===identityRevision.current&&!accountBarrier.current;
    if(!valid())return;
    const readApi=new ScorekeeperApi(apiUrl||'http://localhost:7071/api',()=>step('authentication',()=>latestToken.current()),{signal,readAttempts:2,readOnlyGames:gameScreenPilot});
@@ -285,7 +286,10 @@ function Scorekeeper(){
    if(!valid())return;
    const eligible=pending.filter(g=>((status.scoringRulesVersion||0)>=2||!needsAdvancedRules(g,g.winner))&&(g.targetEnd!=='round'||(status.scoringRulesVersion||0)>=3));
    setLocalCount(eligible.length);setBlockedLocalCount(pending.length-eligible.length);
-  },automaticSignal)}finally{foregroundFlight.current=false;if(mounted.current){setPullRefreshing(false);setForegroundSyncing(false)}}
+  },automaticSignal);
+   if(synced)await scoringControl.refresh(true);
+   return synced;
+  }finally{foregroundFlight.current=false;if(mounted.current){setPullRefreshing(false);setForegroundSyncing(false)}}
  }
  async function reconnect(forceSignIn=false){
   if(accountIntent.current){setError('Complete the pending sign-out or deletion before reconnecting.');return}
