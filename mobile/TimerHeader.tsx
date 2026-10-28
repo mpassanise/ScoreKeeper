@@ -14,4 +14,4 @@ export default function TimerHeader({timerOpen,onTimerClose,...props}:Props){
  const control=visible?<Pressable accessibilityRole="button" accessibilityLabel={label} onPress={props.onTimer} style={[styles.button,{backgroundColor:props.game?colors.surface:'#ffffff15'}]}><Text style={[styles.time,{color:props.game?colors.accent:'#ffffff'}]}>{timerDisplay(timer.seconds)}</Text></Pressable>:undefined;
  return <><AppHeader {...props} timerControl={control}/><GameTimer visible={timerOpen} onClose={onTimerClose} timer={timer}/></>;
 }
-const styles=StyleSheet.create({button:{minWidth:64,minHeight:44,paddingHorizontal:8,paddingVertical:8,borderRadius:12,justifyContent:'center',alignItems:'center'},time:{fontSize:17,fontWeight:'700',fontVariant:['tabular-nums']}});
+const styles=StyleSheet.create({button:{minWidth:64,height:48,paddingHorizontal:8,borderRadius:12,justifyContent:'center',alignItems:'center'},time:{fontSize:17,fontWeight:'700',fontVariant:['tabular-nums']}});
