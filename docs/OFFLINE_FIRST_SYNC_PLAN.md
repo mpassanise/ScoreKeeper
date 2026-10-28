@@ -720,6 +720,12 @@ Implemented the simple confirmed Score here handoff on both platforms, using the
 
 Validation and limitations are recorded in `SCORING_CONTROL_PLAN.md`. Next: confirm migration 006/API deployment, deploy the paired clients after review/merge, and test create/view/takeover/score/finish/delete in both directions. Offline concurrent-device handoff remains explicitly deferred; do not remove the underlying recovery mechanisms or claim offline devices lock instantly.
 
+### iPhone setup keyboard visibility
+
+Enabled native iOS keyboard insets on the main scroll view and disabled its duplicate KeyboardAvoidingView padding on iOS. Setup name, dynamic player-name, starting-number and score/round-limit fields now register focus with a bounded, measurement-based scroll helper. It reveals the full active input with 12 points of space above the keyboard, respecting the fixed header and current scroll position, and reruns for keyboard frame/show events. Visible inputs stay still; stale focus/measurement callbacks and form exit are fenced/cancelled. Starting a game dismisses the system keyboard. Android behavior, web and drawer layouts remain unchanged.
+
+Validation: focused-input geometry, field registration and stale/blur/exit regression checks; existing setup/countdown and pinned-scorer suites; mobile TypeScript and local iOS export. Final architect review covers focus identity, async measurement races, keyboard-inset ownership and cleanup; no scoring, account, queue, receipt or persistence changes and no unresolved findings. Physical iPhone keyboard/rotation acceptance remains outstanding. Next: merge and update iPhone after checks pass; no web/API deployment needed.
+
 ### iPhone completed-game action placement
 
 Moved the primary + New Game button above the completed-game result card and moved Resume into the pinned bottom tray, using a play icon. Resume retains completion permissions and pending-save/reordering guards; New Game stays independent of those permissions. Existing theme colors, safe-area padding, touch targets and four-action tray are retained. No web, API, scoring or persistence behavior changes.
