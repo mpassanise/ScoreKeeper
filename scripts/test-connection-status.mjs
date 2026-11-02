@@ -10,7 +10,7 @@ const output=mkdtempSync(path.join(tmpdir(),'scorekeeper-connection-')),original
 try{
  execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/connection-status.ts','shared/api.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--skipLibCheck','--outDir',output],{stdio:'inherit'});
  writeFileSync(path.join(output,'package.json'),'{"type":"commonjs"}');
- const {createConnectionStatus,connectionText,needsSignIn,isConnectionFailure}=await import(pathToFileURL(path.join(output,'connection-status.js')).href);
+ const {createConnectionStatus,connectionText,needsSignIn,isConnectionFailure,traceConnectionStep}=await import(pathToFileURL(path.join(output,'connection-status.js')).href);
  const {ScorekeeperApi}=await import(pathToFileURL(path.join(output,'api.js')).href);
  const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve}};
  {
@@ -110,6 +110,16 @@ try{
   const c=createConnectionStatus(),pending=deferred(),external=new AbortController();let signal,late=false;c.reset('A');const pass=c.connect(async(valid,s)=>{signal=s;await pending.promise;if(valid())late=true},external.signal);await turn();external.abort();assert.equal(await pass,false);assert.equal(signal.aborted,true);assert.equal(c.getSnapshot().status,'idle');pending.resolve();await turn();assert.equal(late,false);assert.equal(c.getSnapshot().lastConnectedAt,null);
   const already=new AbortController();already.abort();assert.equal(await c.connect(async()=>assert.fail('Aborted before network'),already.signal),false);
   const next=deferred();c.reset('B');const manual=c.connect(async()=>next.promise);external.abort();next.resolve();assert.equal(await manual,true,'old cancellation cannot cancel a new manual/account pass');
+ }
+ {
+  const events=[],startedAt=Date.now(),trace={attempt:'manual-test',startedAt,log:event=>events.push(event)},c=createConnectionStatus();c.reset('A');
+  await c.connect(async(_valid,_signal,step)=>{await step('account',async()=>{});await step('games',async()=>{})},undefined,trace);
+  await traceConnectionStep(trace,'scoring-control',async()=>{});
+  assert.deepEqual(events.filter(event=>event.event==='step-started').map(event=>event.stage),['account','games','scoring-control']);
+  assert.deepEqual(events.filter(event=>event.event==='step-completed').map(event=>event.stage),['account','games','scoring-control']);
+  assert.ok(events.some(event=>event.event==='connection-check-completed'&&event.outcome==='connected'));
+  assert.ok(events.every(event=>event.attempt==='manual-test'&&Number.isFinite(event.elapsedMs)));
+  assert.ok(!JSON.stringify(events).includes('private@example.test'),'timing traces contain no account or game payloads');
  }
  console.log('Connection recovery: single-flight, account isolation, offline/retry, auth classification, bounded timeout, cancelled I/O and token-wait cancellation passed.');
 }finally{globalThis.fetch=originalFetch;rmSync(output,{recursive:true,force:true})}

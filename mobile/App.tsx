@@ -35,7 +35,7 @@ import {useThemeStyles,useTheme,ThemeProvider} from './Theme';
 import DragHandle,{DraggablePlayer} from './DragHandle';
 import {isScoreInput} from '../shared/score-input';
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
-import {createConnectionStatus,isConnectionFailure,RECONNECT_WATCHDOG_MS} from '../shared/connection-status';
+import {createConnectionStatus,createConnectionTimingTrace,traceConnectionStep,isConnectionFailure,RECONNECT_WATCHDOG_MS,type ConnectionTimingTrace} from '../shared/connection-status';
 import ConnectionStatus from './ConnectionStatus';
 import {Alert,AppState,Keyboard,KeyboardAvoidingView,LayoutAnimation,Modal,Platform,Pressable,RefreshControl,ScrollView,StatusBar,StyleSheet,Text,TextInput,View} from 'react-native';
 import {SafeAreaProvider,SafeAreaView} from 'react-native-safe-area-context';
@@ -209,10 +209,12 @@ function Scorekeeper(){
  async function importLocal(){await run(async()=>{if(gameScreenPilot)throw new Error('Device games are kept here. Adding them to your account is not available yet.');const owner=identityRevision.current,valid=()=>canUseAccount(owner);if(!valid())throw new Error('Account access changed. Sign in to reconnect.');const status=await cloudApi.account();if(!valid())return;const supported=(status.scoringRulesVersion||0)>=2;setRulesEnabled(supported);const result=await importPendingGames(localApi,cloudApi,supported,count=>{if(valid())setLocalCount(count)},(status.scoringRulesVersion||0)>=3,valid);if(!valid())return;await loadCloudGames();if(!valid())return;setNotice(importSummary(result))})}
  async function login(){await run(async()=>{if(accountIntent.current)throw new Error('Complete the pending sign-out or deletion before signing in again.');const result=await promptAsync();if(result.type!=='success')return;if(!discovery||!request?.codeVerifier)throw new Error('Sign-in is not ready.');const t=await AuthSession.exchangeCodeAsync({clientId,code:result.params.code,redirectUri,extraParams:{code_verifier:request.codeVerifier}},discovery);await persist(toSession(t));if(accountIntent.current)return;accountBarrier.current=false;setGames((await localApi.list()).filter(g=>g.deviceOnly));setView(null);setSettings(defaultSettings);setPresetId("custom");})}
  async function logout(){if(accountIntent.current!=='deletion')accountIntent.current='sign-out';if(pilot.enabled)accountBarrier.current=true;setView(null);setEditingGame(null);setGames(previous=>previous.filter(g=>g.deviceOnly));activityRevision.current++;identityRevision.current++;connection.reset(null);await pilot.ref.current?.signOut();renewing.current=null;const profile=current.current?.profileId;await setFrequentPlayersAccount(null,null);await gameListCache.clear(profile).catch(()=>{});await persist(null);if(accountIntent.current==='sign-out')accountIntent.current=null;setGames(await localApi.list());setView(null);setGuest(true);if(discovery?.endSessionEndpoint)await WebBrowser.openAuthSessionAsync(discovery.endSessionEndpoint+'?post_logout_redirect_uri='+encodeURIComponent(redirectUri),redirectUri)}
- async function refresh(background=false,manual=false,queued=false,automaticSignal?:AbortSignal,refreshReads=true):Promise<boolean>{
+ async function refresh(background=false,manual=false,queued=false,automaticSignal?:AbortSignal,refreshReads=true,existingTrace?:ConnectionTimingTrace):Promise<boolean>{
   if(automaticSignal?.aborted)return false;
   if(locked.current||!current.current||accountBarrier.current)return false;
-  if(manual&&gameDeliveryPilot&&!queued){const owner=identityRevision.current;const result=await (automaticSignal?manualSync.runAfter:manualSync.run)(String(owner),()=>canUseAccount(owner)&&!automaticSignal?.aborted,connection.whenIdle,()=>refresh(background,true,true,automaticSignal,refreshReads));if(result&&!automaticSignal&&canUseAccount(owner))automatic.recovered();return result}
+  const trace=manual&&!automaticSignal?(existingTrace??createConnectionTimingTrace()):undefined;
+  if(trace&&!existingTrace)trace.log({attempt:trace.attempt,event:'reconnect-started',elapsedMs:0});
+  if(manual&&gameDeliveryPilot&&!queued){const owner=identityRevision.current;const result=await (automaticSignal?manualSync.runAfter:manualSync.run)(String(owner),()=>canUseAccount(owner)&&!automaticSignal?.aborted,connection.whenIdle,()=>refresh(background,true,true,automaticSignal,refreshReads,trace));if(result&&!automaticSignal&&canUseAccount(owner))automatic.recovered();if(!result&&trace)trace.log({attempt:trace.attempt,event:'reconnect-finished',outcome:'unavailable',elapsedMs:Math.max(0,Date.now()-trace.startedAt)});return result}
   const identity=identityRevision.current,revision=activityRevision.current,context=foregroundContext.current;
   connection.reset(String(identity));
   if(!background)setPullRefreshing(true);
@@ -286,9 +288,11 @@ function Scorekeeper(){
    if(!valid())return;
    const eligible=pending.filter(g=>((status.scoringRulesVersion||0)>=2||!needsAdvancedRules(g,g.winner))&&(g.targetEnd!=='round'||(status.scoringRulesVersion||0)>=3));
    setLocalCount(eligible.length);setBlockedLocalCount(pending.length-eligible.length);
-  },automaticSignal);
-   if(synced)await scoringControl.refresh(true);
-   return synced;
+  },automaticSignal,trace);
+   let outcome=synced?'connected' as const:'unavailable' as const;
+   try{if(synced)await traceConnectionStep(trace,'scoring-control',()=>scoringControl.refresh(true));return synced}
+   catch(error){outcome='unavailable';throw error}
+   finally{if(trace)trace.log({attempt:trace.attempt,event:'reconnect-finished',outcome,elapsedMs:Math.max(0,Date.now()-trace.startedAt)})}
   }finally{foregroundFlight.current=false;if(mounted.current){setPullRefreshing(false);setForegroundSyncing(false)}}
  }
  async function reconnect(forceSignIn=false){

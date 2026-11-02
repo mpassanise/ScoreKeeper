@@ -773,3 +773,10 @@ Validation: actual setup component checks across narrow/phone/tablet widths and 
 - Updated recovery/delivery messages to identify whether scores are saved locally, awaiting account confirmation, or need review, without changing queue or retry behavior.
 - Validation: game-read-model, manual-delivery (IndexedDB/SQLite and web/mobile shell), scoring-control tests; web and mobile TypeScript; diff whitespace checks passed. Architect review found copy-only changes; no account isolation, operation IDs/receipts, queue, duplicate, recovery or deletion logic changed.
 - Physical usability acceptance remains outstanding. Next: merge and test handoff/offline language in both themes and platforms; no API deployment required.
+
+
+### On-demand reconnect timing diagnostics
+
+Added structured, PII-free console timing events for an explicit manual reconnect on web and iPhone. Each trace records total elapsed time and start/completion/failure duration for connection stages, including the final scoring-control refresh; a watchdog timeout includes its pending stage names. Background automatic sync remains silent. Existing Reconnect/Sync controls already trigger the same complete refresh, so no credential expiry or synthetic reconnect mode is introduced. Browser Network timing remains the source for individual HTTP request duration; stage timing reveals work surrounding those requests, such as token acquisition and local checks.
+
+Validation: connection-status regression verifies trace stage order, overall completion, elapsed values and absence of account/game payloads; TypeScript, production web build and diff checks pass. Architect review: instrumentation is optional and guarded so console logging cannot break reconnect; it does not change retry, token, ownership, offline storage or sync behavior. Physical-device console acceptance remains outstanding. Next: merge and deploy the diagnostics, then open DevTools Console and tap the existing Reconnect/Sync control once after a long idle period.
