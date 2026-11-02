@@ -42,7 +42,7 @@ try{
  // Account/game changes make delayed callbacks inert and dispose subscriptions.
  const ready=deferred();control={canScore:false,hasScorer:true,epoch:7};foreground();state=await flush();const moving=state.take(async()=>{},()=>ready.promise);await Promise.resolve();await Promise.resolve();owner='B';game='other';render();ready.resolve();await moving;state=await flush();assert.equal(state.key,JSON.stringify(['B','other']));owner=null;game=undefined;render();assert.equal(intervals.size,0);assert.equal(foreground,undefined);assert.equal(changed,undefined);
  // A successful game sync must recheck ownership in both clients before scoring can continue.
- for(const file of ['app/cloud/CloudHome.tsx','mobile/App.tsx'])assert.match(readFileSync(file,'utf8'),/if\(synced\)await scoringControl\.refresh\(true\)/,`${file} must refresh scoring ownership after sync`);
+ for(const file of ['app/cloud/CloudHome.tsx','mobile/App.tsx'])assert.match(readFileSync(file,'utf8'),/if\(synced\)await (?:traceConnectionStep\(trace,'scoring-control',\(\)=>)?scoringControl\.refresh\(true\)\)?/,`${file} must refresh scoring ownership after sync`);
  // Run both actual shell handoff handlers, including repository barriers and draft capture.
  for(const native of [false,true])for(const race of ['normal','pending','pending-intent','account','game']){
   const source=readFileSync(native?'mobile/App.tsx':'app/cloud/CloudHome.tsx','utf8'),start=source.indexOf(' async function moveScoringHere()'),end=source.indexOf(' function confirmScoreHere()',start),code=ts.transpileModule(source.slice(start,end),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
