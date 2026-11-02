@@ -8,12 +8,17 @@ import ts from '../node_modules/typescript/lib/typescript.js';
 const root=mkdtempSync(path.join(tmpdir(),'scorekeeper-control-'));
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return {promise,resolve,reject}};
 try{
- execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/api.ts','shared/repository/operation-transport.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--strict','--skipLibCheck','--outDir',root],{stdio:'inherit'});
+ execFileSync(process.execPath,['node_modules/typescript/bin/tsc','shared/api.ts','shared/repository/operation-transport.ts','shared/repository/scoring-location.ts','--target','ES2022','--module','commonjs','--moduleResolution','node','--strict','--skipLibCheck','--outDir',root],{stdio:'inherit'});
  writeFileSync(path.join(root,'package.json'),'{"type":"commonjs"}');const require=createRequire(import.meta.url),device=require(path.join(root,'scoring-device.js')),{ScorekeeperApi,ApiError}=require(path.join(root,'api.js')),{createOperationTransport}=require(path.join(root,'repository/operation-transport.js'));
+ const scoringLocation=require(path.join(root,'repository/scoring-location.js'));
  const saved=new Map(),id='11223344-1122-4433-8899-112233445566';let writes=0;
  device.configureScoringDevice({read:async key=>saved.get(key)??null,write:async(key,value)=>{writes++;saved.set(key,value)}},()=>id);
  assert.deepEqual(await Promise.all([device.scoringDeviceId(),device.scoringDeviceId()]),[id,id]);assert.equal(writes,1);
  await device.rememberScoringPermission('A','game',false);assert.equal(await device.readScoringPermission('A','game'),false);assert.equal(await device.readScoringPermission('B','game'),undefined);await device.rememberScoringActivation('A','game');assert.equal(await device.readScoringPermission('A','game'),false);assert.equal(await device.readScoringActivation('A','game'),true);await device.rememberScoringPermission('A','game',false);assert.equal(await device.readScoringActivation('A','game'),false);
+ let inFlight=0,maxInFlight=0;
+ const locationApi={withSignal:signal=>({scoringControl:async gameId=>{inFlight++;maxInFlight=Math.max(maxInFlight,inFlight);try{await new Promise(resolve=>setTimeout(resolve,2));if(signal.aborted)throw Error('cancelled');if(gameId==='unavailable')throw Error('unavailable');return {hasScorer:gameId!=='idle',canScore:gameId==='here',epoch:1}}finally{inFlight--}}})};
+ const locations=await scoringLocation.readScoringLocations(locationApi,['here','elsewhere','idle','unavailable'],new AbortController().signal,2);
+ assert.deepEqual(locations,{here:'this-device',elsewhere:'another-device'});assert.ok(maxInFlight<=2&&maxInFlight===2,'location reads stay bounded');
  const originalFetch=globalThis.fetch,sent=[];try{
   globalThis.fetch=async(url,opts)=>{sent.push({url,opts});return {ok:true,json:async()=>url.endsWith('/account')?{scoringControlEnabled:true}:{canScore:false,hasScorer:true,epoch:3}}};
   const api=new ScorekeeperApi('https://example.test',async()=>'token',{readOnlyGames:true});await api.scoringControl('game');await api.takeScoringControl('game',3);assert.equal(sent[0].opts.headers['X-Scorekeeper-Device'],id);assert.deepEqual(JSON.parse(sent[1].opts.body),{expectedEpoch:3});assert.throws(()=>api.act({id:'game',version:1},{action:'finish'}));
