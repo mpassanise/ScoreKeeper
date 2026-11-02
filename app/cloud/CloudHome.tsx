@@ -25,7 +25,7 @@ import {useRepositoryPilot} from './useRepositoryPilot';
 import polish from "./WebPolish.module.css";
 import {Trophy,Trash2,LogIn} from "lucide-react";
 import {useEffect,useRef,useState,useSyncExternalStore} from "react";
-import {createConnectionStatus,isConnectionFailure,RECONNECT_WATCHDOG_MS} from "../../shared/connection-status";
+import {createConnectionStatus,createConnectionTimingTrace,traceConnectionStep,isConnectionFailure,RECONNECT_WATCHDOG_MS,type ConnectionTimingTrace} from "../../shared/connection-status";
 import {createGameListCache} from "../../shared/game-list-cache";
 import ConnectionStatus from "./ConnectionStatus";
 import {ScorekeeperApi,ApiError,type Game,type GameView,type GameSummary,type Action} from "../../shared/api";
@@ -146,10 +146,12 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
   update();window.addEventListener("online",update);window.addEventListener("offline",update);
   return()=>{window.removeEventListener("online",update);window.removeEventListener("offline",update)};
  },[connection]);
- async function syncGames(manual=false,queued=false,automaticSignal?:AbortSignal,refreshReads=true):Promise<boolean>{
+ async function syncGames(manual=false,queued=false,automaticSignal?:AbortSignal,refreshReads=true,existingTrace?:ConnectionTimingTrace):Promise<boolean>{
   if(automaticSignal?.aborted)return false;
   const owner=identity.current;if(!owner||locked.current||accountBarrier.current)return false;
-  if(manual&&gameDeliveryPilot&&!queued){const result=await (automaticSignal?manualSync.runAfter:manualSync.run)(owner,()=>canUseAccount(owner)&&!automaticSignal?.aborted,connection.whenIdle,()=>syncGames(true,true,automaticSignal,refreshReads));if(result&&!automaticSignal&&canUseAccount(owner))automatic.recovered();return result}
+  const trace=manual&&!automaticSignal?(existingTrace??createConnectionTimingTrace()):undefined;
+  if(trace&&!existingTrace)trace.log({attempt:trace.attempt,event:'reconnect-started',elapsedMs:0});
+  if(manual&&gameDeliveryPilot&&!queued){const result=await (automaticSignal?manualSync.runAfter:manualSync.run)(owner,()=>canUseAccount(owner)&&!automaticSignal?.aborted,connection.whenIdle,()=>syncGames(true,true,automaticSignal,refreshReads,trace));if(result&&!automaticSignal&&canUseAccount(owner))automatic.recovered();if(!result&&trace)trace.log({attempt:trace.attempt,event:'reconnect-finished',outcome:'unavailable',elapsedMs:Math.max(0,Date.now()-trace.startedAt)});return result}
   connection.reset(owner);
   const synced=await connection.connect(async(isCurrent,signal,step,reportDelivery)=>{
    const valid=()=>mounted.current&&isCurrent()&&!automaticSignal?.aborted&&identity.current===owner&&!accountBarrier.current;
@@ -212,9 +214,11 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
    if(status.profileId){await step('players',()=>setFrequentPlayersAccount(status.profileId!,cloudApi));if(!valid())return;await step('players',()=>syncFrequentPlayers())}
    const pending=await step('imports',()=>(gameScreenPilot?Promise.resolve([]):pendingImports(localApi,readApi,saved,valid)));if(!valid())return;setLocalCount(pending.length);
    const user=(await auth()).getActiveAccount();if(valid()&&user?.homeAccountId===owner&&status.profileId)try{localStorage.setItem('scorekeeper-player-profile:'+owner,status.profileId)}catch{}
-  },automaticSignal);
-  if(synced)await scoringControl.refresh(true);
-  return synced;
+  },automaticSignal,trace);
+  let outcome=synced?'connected' as const:'unavailable' as const;
+  try{if(synced)await traceConnectionStep(trace,'scoring-control',()=>scoringControl.refresh(true));return synced}
+  catch(error){outcome='unavailable';throw error}
+  finally{if(trace)trace.log({attempt:trace.attempt,event:'reconnect-finished',outcome,elapsedMs:Math.max(0,Date.now()-trace.startedAt)})}
  }
 
  async function enterGuest(){await run(async()=>{setGames(await localApi.list());setView(null);setGuest(true)})}
