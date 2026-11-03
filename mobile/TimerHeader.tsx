@@ -14,10 +14,10 @@ export default function TimerHeader({timerOpen,onTimerClose,...props}:Props){
  const timer=useGameTimer(),{dark}=useTheme(),colors=gameChromeColors(dark);
  const player=useAudioPlayer(require('./assets/timer-beep.wav'));
  const [soundEnabled,setSoundEnabled]=useState(true),[showTimerEnded,setShowTimerEnded]=useState(false);
- const soundEnabledRef=useRef(true),lastCompletion=useRef(timer.completionCount),hideAlert=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const soundEnabledRef=useRef(true),soundChanged=useRef(false),lastCompletion=useRef(timer.completionCount),hideAlert=useRef<ReturnType<typeof setTimeout>|null>(null);
  useEffect(()=>{
   let active=true;
-  void AsyncStorage.getItem(soundPreferenceKey).then(value=>{if(active&&(value==='true'||value==='false')){const enabled=value==='true';soundEnabledRef.current=enabled;setSoundEnabled(enabled)}}).catch(()=>{});
+  void AsyncStorage.getItem(soundPreferenceKey).then(value=>{if(active&&!soundChanged.current&&(value==='true'||value==='false')){const enabled=value==='true';soundEnabledRef.current=enabled;setSoundEnabled(enabled)}}).catch(()=>{});
   // Short UI sounds should mix with other audio and remain audible when the
   // iPhone's silent switch is on, like a conventional timer alert.
   void setAudioModeAsync({interruptionMode:'mixWithOthers',playsInSilentMode:true}).catch(()=>{});
@@ -31,7 +31,7 @@ export default function TimerHeader({timerOpen,onTimerClose,...props}:Props){
   hideAlert.current=setTimeout(()=>{setShowTimerEnded(false);hideAlert.current=null},1600);
   if(soundEnabledRef.current){try{void player.seekTo(0).then(()=>player.play()).catch(()=>{})}catch{/* Timer completion must remain visible if audio is unavailable. */}}
  },[timer.completionCount,player]);
- function changeSoundEnabled(enabled:boolean){soundEnabledRef.current=enabled;setSoundEnabled(enabled);void AsyncStorage.setItem(soundPreferenceKey,String(enabled)).catch(()=>{});}
+ function changeSoundEnabled(enabled:boolean){soundChanged.current=true;soundEnabledRef.current=enabled;setSoundEnabled(enabled);void AsyncStorage.setItem(soundPreferenceKey,String(enabled)).catch(()=>{});}
  const visible=!timerOpen&&(timer.running||timer.finished||timer.seconds!==timer.duration);
  const label=timer.finished?'Timer finished; open timer':`Timer ${timer.running?'running':'paused'}, ${timer.seconds} seconds remaining; open timer`;
  const control=visible?<Pressable accessibilityRole="button" accessibilityLabel={label} onPress={props.onTimer} style={[styles.button,{backgroundColor:(props.game||props.screenTitle)?colors.surface:'#ffffff15'}]}><Text style={[styles.time,{color:(props.game||props.screenTitle)?colors.accent:'#ffffff'}]}>{timerDisplay(timer.seconds)}</Text></Pressable>:undefined;
