@@ -65,5 +65,5 @@ public class Functions(TokenVerifier auth,GameStore store,ILogger<Functions> log
  {
   using var buffer=new MemoryStream();var chunk=new byte[8192];int read;while((read=await r.Body.ReadAsync(chunk))>0){if(buffer.Length+read>2_000_000)throw new ArgumentException("Request is too large.");buffer.Write(chunk,0,read);}try{return new System.Text.UTF8Encoding(false,true).GetString(buffer.ToArray());}catch(System.Text.DecoderFallbackException){throw new JsonException("Invalid UTF-8.");}
  }
- static async Task<HttpResponseData> Reply(HttpRequestData r,int status,object data){var response=r.CreateResponse((HttpStatusCode)status);response.Headers.Add("Content-Type","application/json; charset=utf-8");response.Headers.Add("Cache-Control","no-store");await response.WriteStringAsync(JsonSerializer.Serialize(data,GameStore.Json));return response;}
+ static async Task<HttpResponseData> Reply(HttpRequestData r,int status,object data){var response=r.CreateResponse((HttpStatusCode)status);response.Headers.Add("Content-Type","application/json; charset=utf-8");response.Headers.Add("Cache-Control","no-store");response.Headers.Add("Timing-Allow-Origin","*");await response.WriteStringAsync(JsonSerializer.Serialize(data,GameStore.Json));return response;}
 }

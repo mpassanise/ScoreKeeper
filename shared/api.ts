@@ -18,6 +18,13 @@ export type AccountStatus={scoringControlEnabled?:boolean;gameOperations?:GameOp
 export type AccountDeletion={status:"pending"|"completed";message:string};
 export class ApiError extends Error{constructor(public status:number,message:string,public code?:string,public requestId?:string){super(message)}}
 function cancelled(){return new ApiError(499,'Connection attempt cancelled.','REQUEST_CANCELLED')}
+function accountTiming(url:string,started:number,elapsedMs:number,status?:number){
+ if(typeof performance==='undefined')return;
+ const entry=[...performance.getEntriesByType('resource')].filter((value):value is PerformanceResourceTiming=>'name'in value&&value.name===url&&value.startTime>=started-1).at(-1);
+ const duration=(from:number,to:number)=>from>0&&to>=from?Math.round(to-from):null;
+ const value={route:'/account',outcome:status===undefined?'failed':'response',status,elapsedMs,...(entry?{timingAvailable:entry.requestStart>0||entry.connectEnd>0,dnsMs:duration(entry.domainLookupStart,entry.domainLookupEnd),tcpMs:duration(entry.connectStart,entry.connectEnd),tlsMs:entry.secureConnectionStart>0?duration(entry.secureConnectionStart,entry.connectEnd):null,serverWaitMs:duration(entry.requestStart,entry.responseStart),downloadMs:duration(entry.responseStart,entry.responseEnd)}:{timingAvailable:false})};
+ try{console.info('[Scorekeeper network]',value)}catch{/* Diagnostics cannot interrupt reconnect. */}
+}
 async function abortable<T>(work:Promise<T>,signal?:AbortSignal):Promise<T>{
  if(!signal)return work;
  let abort:()=>void=()=>{};
@@ -44,11 +51,11 @@ export class ScorekeeperApi{
   // Retry only safe reads. A timed-out write may already have committed.
   for(let attempt=0;attempt<attempts;attempt++){
    if(signal?.aborted)throw cancelled();
-   const controller=new AbortController(),started=Date.now(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});let timer:ReturnType<typeof setTimeout>;
+   const controller=new AbortController(),started=Date.now(),timingStarted=typeof performance==='undefined'?0:performance.now(),requestUrl=this.base.replace(/\/$/,"")+path;let responseStatus:number|undefined;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});let timer:ReturnType<typeof setTimeout>;
    try{
     const work=async()=>{
-     const response=await fetch(this.base.replace(/\/$/,"")+path,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json",...(device?{"X-Scorekeeper-Device":device}:{})},body:read?undefined:rawJson?body as string:JSON.stringify(body),signal:controller.signal});
-     const value:unknown=await response.json().catch(()=>null);
+     const response=await fetch(requestUrl,{method:read?"GET":"POST",headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json",...(device?{"X-Scorekeeper-Device":device}:{})},body:read?undefined:rawJson?body as string:JSON.stringify(body),signal:controller.signal});
+     responseStatus=response.status;const value:unknown=await response.json().catch(()=>null);
      if(!response.ok){
       const data=value&&typeof value==="object"?value as Record<string,unknown>:{};
       if(data.code==='SCORING_ELSEWHERE'){let id=path.match(/^\/games\/([^/]+)/)?.[1];if(path==='/game-operations')try{id=JSON.parse(body as string).gameId}catch{}if(id)scoringControlChanged(id)}
@@ -63,7 +70,7 @@ export class ScorekeeperApi{
    }catch(error){
     const transient=error instanceof ApiError&&(error.code==='REQUEST_TIMEOUT'||error.code==='DATABASE_WAKING');
     if(!read||!transient||attempt===attempts-1)throw error;
-   }finally{clearTimeout(timer!);signal?.removeEventListener('abort',abort)}
+   }finally{if(path==='/account')accountTiming(requestUrl,timingStarted,Date.now()-started,responseStatus);clearTimeout(timer!);signal?.removeEventListener('abort',abort)}
    await new Promise(resolve=>setTimeout(resolve,1000*(attempt+1)));
   }
   throw new ApiError(503,'Account service is unavailable.');

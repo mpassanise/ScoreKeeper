@@ -30,7 +30,7 @@ import {createConnectionStatus,createConnectionTimingTrace,traceConnectionStep,i
 import {createGameListCache} from "../../shared/game-list-cache";
 import ConnectionStatus from "./ConnectionStatus";
 import {ScorekeeperApi,ApiError,type Game,type GameView,type GameSummary,type Action} from "../../shared/api";
-import {auth,cloudEnabled,cloudConfig,signIn,signOut,token} from "./auth";
+import {auth,cloudEnabled,cloudConfig,signIn,signOut,token,reconnectWithTokenPrompt} from "./auth";
 import {Dialog,DialogContent,DialogTitle} from "@/components/ui/dialog";
 import HeaderMenu from "./HeaderMenu";
 import SettingsDrawer from "./SettingsDrawer";
@@ -123,7 +123,7 @@ export default function CloudHome({initialSettingsOpen=false,onSettingsClose}:{i
   try{
    const draft:ReconnectDraft={identity:identity.current!,gameId:view?.game.id,deviceOnly:view?.game.deviceOnly,gameVersion:view?.game.version,next:view?.game.next,points,creating,name,names,settings,presetId};
    if(identity.current)sessionStorage.setItem(reconnectDraftKey,JSON.stringify(draft));
-   await signIn();
+   await reconnectWithTokenPrompt();
   }catch(e){setError((e as {code?:string})?.code==='SCORING_ELSEWHERE'?'Scoring is on another device. Choose Score here to continue.':e instanceof Error?e.message:'Could not start sign-in. Your input has been kept.')}
  }
  async function logout(){if(pilot.enabled)accountBarrier.current=true;setView(null);setEditingGame(null);setGames(previous=>previous.filter(g=>g.deviceOnly));identity.current=null;activity.current++;connection.reset(null);await pilot.ref.current?.signOut();await setFrequentPlayersAccount(null,null);await signOut()}
