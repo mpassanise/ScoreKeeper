@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState,type ComponentProps} from 'react';
-import {Animated,Pressable,StyleSheet,Text,View} from 'react-native';
+import {Pressable,StyleSheet,Text,View} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {setAudioModeAsync,useAudioPlayer} from 'expo-audio';
 import {useGameTimer,timerDisplay} from '../shared/use-game-timer';
@@ -29,7 +29,7 @@ export default function TimerHeader({timerOpen,onTimerClose,...props}:Props){
   setShowTimerEnded(true);
   if(hideAlert.current)clearTimeout(hideAlert.current);
   hideAlert.current=setTimeout(()=>{setShowTimerEnded(false);hideAlert.current=null},1600);
-  if(soundEnabledRef.current){try{void player.seekTo(0);player.play()}catch{/* Timer completion must remain visible if audio is unavailable. */}}
+  if(soundEnabledRef.current){try{void player.seekTo(0).then(()=>player.play()).catch(()=>{})}catch{/* Timer completion must remain visible if audio is unavailable. */}}
  },[timer.completionCount,player]);
  function changeSoundEnabled(enabled:boolean){soundEnabledRef.current=enabled;setSoundEnabled(enabled);void AsyncStorage.setItem(soundPreferenceKey,String(enabled)).catch(()=>{});}
  const visible=!timerOpen&&(timer.running||timer.finished||timer.seconds!==timer.duration);
