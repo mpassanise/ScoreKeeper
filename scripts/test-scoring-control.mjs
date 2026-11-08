@@ -48,6 +48,11 @@ try{
  const ready=deferred();control={canScore:false,hasScorer:true,epoch:7};foreground();state=await flush();const moving=state.take(async()=>{},()=>ready.promise);await Promise.resolve();await Promise.resolve();owner='B';game='other';render();ready.resolve();await moving;state=await flush();assert.equal(state.key,JSON.stringify(['B','other']));owner=null;game=undefined;render();assert.equal(intervals.size,0);assert.equal(foreground,undefined);assert.equal(changed,undefined);
  // A successful game sync must recheck ownership in both clients before scoring can continue.
  for(const file of ['app/cloud/CloudHome.tsx','mobile/App.tsx'])assert.match(readFileSync(file,'utf8'),/if\(synced\)await (?:traceConnectionStep\(trace,'scoring-control',\(\)=>)?scoringControl\.refresh\(true\)\)?/,`${file} must refresh scoring ownership after sync`);
+ const mobileSource=readFileSync('mobile/App.tsx','utf8');
+ assert.match(mobileSource,/const accountScoreChecking=scoringControl\.checking&&!scoringControl\.working&&scoringControl\.canScore/,'mobile keeps the active score entry mounted during a non-blocking ownership check');
+ assert.match(mobileSource,/p\.id===game\.next&&!reordering&&\(!accountScoreReadOnly\|\|accountScoreChecking&&accountCanScore\)&&!pendingScoreSave&&<InlineScoreEntry/,'mobile shows the active score entry only while the last account read still grants scoring');
+ const inlineEntry=mobileSource.slice(mobileSource.indexOf('<InlineScoreEntry'));
+ assert.match(inlineEntry,/busy=\{busy\|\|accountScoreChecking\}/,'mobile prevents score writes while scoring ownership is being rechecked');
  // Run both actual shell handoff handlers, including repository barriers and draft capture.
  for(const native of [false,true])for(const race of ['normal','pending','pending-intent','account','game']){
   const source=readFileSync(native?'mobile/App.tsx':'app/cloud/CloudHome.tsx','utf8'),start=source.indexOf(' async function moveScoringHere()'),end=source.indexOf(' function confirmScoreHere()',start),code=ts.transpileModule(source.slice(start,end),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
