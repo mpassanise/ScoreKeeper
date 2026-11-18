@@ -1,12 +1,19 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
+export const TIMER_PRESETS=[30,60,120] as const;
+export const MAX_TIMER_SECONDS=99*60+59;
+export function parseTimerParts(minutes:string,seconds:string):number|null{
+ if(!/^\\d+$/.test(minutes)||!/^\\d+$/.test(seconds))return null;
+ const mins=Number(minutes),secs=Number(seconds),total=mins*60+secs;
+ return Number.isSafeInteger(total)&&mins<=99&&secs<=59&&total>0?total:null;
+}
 /** Deadline-based countdown: background throttling never extends the timer.
  * Local utility only; closing its panel or switching games does not reset it. */
 export function useGameTimer(){
- const [duration,setDuration]=useState<30|60>(30),[remaining,setRemaining]=useState(30000),[running,setRunning]=useState(false),[finished,setFinished]=useState(false),[completionCount,setCompletionCount]=useState(0);
+ const [duration,setDuration]=useState(30),[remaining,setRemaining]=useState(30000),[running,setRunning]=useState(false),[finished,setFinished]=useState(false),[completionCount,setCompletionCount]=useState(0);
  const deadline=useRef<number|null>(null),leftRef=useRef(30000);
  const update=useCallback(()=>{const left=deadline.current===null?leftRef.current:Math.max(0,deadline.current-Date.now());leftRef.current=left;setRemaining(left);if(deadline.current!==null&&left===0){deadline.current=null;setRunning(false);setFinished(true);setCompletionCount(count=>count+1)}return left},[]);
  useEffect(()=>{if(!running)return;const timer=setInterval(update,200);return()=>clearInterval(timer)},[running]);
- function choose(value:30|60){deadline.current=null;setDuration(value);leftRef.current=value*1000;setRemaining(value*1000);setRunning(false);setFinished(false)}
+ function choose(value:number){if(!Number.isSafeInteger(value)||value<1||value>MAX_TIMER_SECONDS)return;deadline.current=null;setDuration(value);leftRef.current=value*1000;setRemaining(value*1000);setRunning(false);setFinished(false)}
  function toggle(){if(running){update();deadline.current=null;setRunning(false)}else{const left=remaining>0?remaining:duration*1000;deadline.current=Date.now()+left;leftRef.current=left;setRemaining(left);setFinished(false);setRunning(true)}}
  return {refresh:update,duration,completionCount,seconds:Math.ceil(remaining/1000),running,finished,choose,toggle,reset:()=>choose(duration)};
 }
