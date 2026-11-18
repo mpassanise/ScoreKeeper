@@ -2,7 +2,7 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 export const TIMER_PRESETS=[30,60,120] as const;
 export const MAX_TIMER_SECONDS=99*60+59;
 export function parseTimerParts(minutes:string,seconds:string):number|null{
- if(!/^\\d+$/.test(minutes)||!/^\\d+$/.test(seconds))return null;
+ if(!/^\d+$/.test(minutes)||!/^\d+$/.test(seconds))return null;
  const mins=Number(minutes),secs=Number(seconds),total=mins*60+secs;
  return Number.isSafeInteger(total)&&mins<=99&&secs<=59&&total>0?total:null;
 }
