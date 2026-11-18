@@ -11,7 +11,9 @@ now+=60000;t.refresh();t=render();assert.equal(t.seconds,29,'pause retains exact
 t.toggle();t=render();assert.equal(t.seconds,30);assert.equal(t.finished,false);t.choose(60);t=render();assert.equal(t.seconds,60);assert.equal(t.running,false);assert.equal(intervals.size,0);
 t.toggle();t=render();now+=120000;t.refresh();t=render();assert.equal(t.seconds,0,'suspension does not extend deadline');assert.equal(t.finished,true);t.reset();t=render();assert.equal(t.seconds,60);assert.equal(t.finished,false);
 assert.equal(module.exports.timerDisplay(60),'1:00');assert.equal(module.exports.timerDisplay(30),'0:30');assert.equal(module.exports.timerDisplay(0),'0:00');
-console.log('Game timer: 30/60 selection, pause/resume precision, reset/restart, suspension deadline, completion, formatting and interval cleanup passed.');
+assert.deepEqual(module.exports.TIMER_PRESETS,[30,60,120]);assert.equal(module.exports.parseTimerParts('2','15'),135);assert.equal(module.exports.parseTimerParts('0','1'),1);assert.equal(module.exports.parseTimerParts('0','0'),null);assert.equal(module.exports.parseTimerParts('100','0'),null);assert.equal(module.exports.parseTimerParts('1','60'),null);assert.equal(module.exports.parseTimerParts('','30'),null);
+t=render();t.choose(135);t=render();assert.equal(t.duration,135);assert.equal(t.seconds,135);t.toggle();t=render();now+=135000;t.refresh();t=render();assert.equal(t.finished,true);t.reset();t=render();assert.equal(t.seconds,135,'custom duration resets to its full value');t.choose(6000);t=render();assert.equal(t.duration,135,'out-of-range custom duration is ignored');
+console.log('Game timer: 30/60/120 and custom duration selection, pause/resume precision, reset/restart, suspension deadline, completion, formatting and interval cleanup passed.');
 // The web header and dialog share one clock; opening the panel doesn't create a second timer.
 let clock={seconds:29,duration:30,running:true,finished:false};
 const headerModule={exports:{}};
@@ -41,4 +43,13 @@ let soundChange;
 const timerPanel=gameTimerModule.exports.default({visible:true,onClose(){},timer:clock,soundEnabled:true,onSoundEnabledChange:value=>soundChange=value});
 const soundSwitch=nodes(timerPanel,n=>n.type==='Switch'&&n.props.accessibilityLabel==='Timer end sound')[0];assert.ok(soundSwitch);assert.equal(soundSwitch.props.value,true);soundSwitch.props.onValueChange(false);assert.equal(soundChange,false,'sound switch updates persisted preference state');
 console.log('iPhone timer setup: accessible sound switch is visible and updates its setting.');
+const webTimerSource=readFileSync('app/cloud/GameTimer.tsx','utf8'),nativeTimerSource=readFileSync('mobile/GameTimer.tsx','utf8');
+for(const pair of [[webTimerSource,'web'],[nativeTimerSource,'iPhone']]){
+ const source=pair[0],label=pair[1];
+ assert.match(source,/TIMER_PRESETS/,label+' exposes shared timer presets');
+ assert.match(source,/Custom timer minutes/,label+' provides custom minutes entry');
+ assert.match(source,/Custom timer seconds/,label+' provides custom seconds entry');
+ assert.match(source,/Set timer/,label+' has an explicit custom timer action');
+ assert.match(source,/parseTimerParts/,label+' validates custom timer duration');
+}
 
